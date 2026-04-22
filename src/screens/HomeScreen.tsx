@@ -4,19 +4,34 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppButton } from "../components/AppButton";
 import { PortlyLogo } from "../components/PortlyLogo";
+import { useIntercom } from "../hooks/useIntercom";
 import type { RootStackParamList } from "../navigation/types";
 import { colors } from "../theme/colors";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Home">;
 
 export function HomeScreen({ navigation }: Props) {
+  const { connected, hasBell, bellTimestamp, dismissBell } = useIntercom();
+
+  function handleAnswer() {
+    dismissBell();
+    navigation.navigate("LiveIntercom");
+  }
+
+  function handleLater() {
+    dismissBell();
+    navigation.navigate("Activity");
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Ola, Julia</Text>
-            <Text style={styles.subtitle}>Porta principal esta monitorada</Text>
+            <Text style={styles.subtitle}>
+              {connected ? "Porta principal monitorada" : "A ligar ao videoporteiro…"}
+            </Text>
           </View>
           <PortlyLogo showWordmark={false} size="small" />
         </View>
@@ -25,11 +40,15 @@ export function HomeScreen({ navigation }: Props) {
           <View style={styles.liveHeader}>
             <View>
               <Text style={styles.liveLabel}>Camera da entrada</Text>
-              <Text style={styles.liveTitle}>Sem chamada ativa</Text>
+              <Text style={styles.liveTitle}>
+                {hasBell ? "Chamada recebida!" : "Sem chamada ativa"}
+              </Text>
             </View>
-            <View style={styles.onlineBadge}>
-              <View style={styles.onlineDot} />
-              <Text style={styles.onlineText}>Online</Text>
+            <View style={[styles.statusBadge, connected ? styles.onlineBadge : styles.offlineBadge]}>
+              <View style={[styles.statusDot, connected ? styles.onlineDot : styles.offlineDot]} />
+              <Text style={[styles.statusText, connected ? styles.onlineText : styles.offlineText]}>
+                {connected ? "Online" : "Offline"}
+              </Text>
             </View>
           </View>
 
@@ -37,9 +56,13 @@ export function HomeScreen({ navigation }: Props) {
             <View style={styles.previewCamera}>
               <View style={styles.previewLens} />
             </View>
-            <Text style={styles.previewTitle}>Feed de video simulado</Text>
+            <Text style={styles.previewTitle}>
+              {connected ? "Pi ligado" : "Pi desligado"}
+            </Text>
             <Text style={styles.previewText}>
-              Aqui entra a transmissao da camera quando o Raspberry Pi estiver ligado.
+              {connected
+                ? 'Toque em "Abrir camera ao vivo" para ver o feed.'
+                : "Ligue o servidor no Raspberry Pi para ativar a camera."}
             </Text>
           </View>
 
@@ -49,26 +72,30 @@ export function HomeScreen({ navigation }: Props) {
           />
         </View>
 
-        <View style={styles.alertCard}>
-          <Text style={styles.alertKicker}>Campainha</Text>
-          <Text style={styles.alertTitle}>Visitante na porta</Text>
-          <Text style={styles.alertText}>
-            Simulacao de uma chamada recebida. Serve para testar o fluxo do video-porteiro.
-          </Text>
-          <View style={styles.row}>
-            <AppButton
-              label="Atender"
-              onPress={() => navigation.navigate("LiveIntercom")}
-              style={styles.flex}
-            />
-            <AppButton
-              label="Ver depois"
-              onPress={() => navigation.navigate("Activity")}
-              style={styles.flex}
-              variant="secondary"
-            />
+        {hasBell && (
+          <View style={styles.alertCard}>
+            <Text style={styles.alertKicker}>Campainha</Text>
+            <Text style={styles.alertTitle}>Visitante na porta</Text>
+            {bellTimestamp ? (
+              <Text style={styles.alertText}>
+                {new Date(bellTimestamp).toLocaleTimeString("pt-PT", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })}
+              </Text>
+            ) : null}
+            <View style={styles.row}>
+              <AppButton label="Atender" onPress={handleAnswer} style={styles.flex} />
+              <AppButton
+                label="Ver depois"
+                onPress={handleLater}
+                style={styles.flex}
+                variant="secondary"
+              />
+            </View>
           </View>
-        </View>
+        )}
 
         <View style={styles.grid}>
           <AppButton
@@ -87,9 +114,13 @@ export function HomeScreen({ navigation }: Props) {
 
         <View style={styles.infoCard}>
           <Text style={styles.infoTitle}>Estado do sistema</Text>
-          <Text style={styles.infoLine}>Supabase: preparado, ainda nao ligado</Text>
-          <Text style={styles.infoLine}>Raspberry Pi: bridge mockada</Text>
-          <Text style={styles.infoLine}>Expo Go: compativel nesta fase</Text>
+          <Text style={styles.infoLine}>
+            Raspberry Pi: {connected ? "ligado" : "desligado"}
+          </Text>
+          <Text style={styles.infoLine}>
+            Campainha: {hasBell ? "tocou recentemente" : "sem eventos"}
+          </Text>
+          <Text style={styles.infoLine}>Expo Go: compativel</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -146,26 +177,26 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginTop: 4,
   },
-  onlineBadge: {
+  statusBadge: {
     alignItems: "center",
-    backgroundColor: "#e8f8ef",
     borderRadius: 999,
     flexDirection: "row",
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  onlineDot: {
-    backgroundColor: colors.success,
+  onlineBadge: { backgroundColor: "#e8f8ef" },
+  offlineBadge: { backgroundColor: "#f5f5f5" },
+  statusDot: {
     borderRadius: 5,
     height: 10,
     width: 10,
   },
-  onlineText: {
-    color: colors.success,
-    fontSize: 13,
-    fontWeight: "800",
-  },
+  onlineDot: { backgroundColor: colors.success },
+  offlineDot: { backgroundColor: colors.textMuted },
+  statusText: { fontSize: 13, fontWeight: "800" },
+  onlineText: { color: colors.success },
+  offlineText: { color: colors.textMuted },
   preview: {
     alignItems: "center",
     backgroundColor: colors.backgroundDark,
