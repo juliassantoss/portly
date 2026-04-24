@@ -1,11 +1,10 @@
 /**
  * Portly Pi Server
  *
- * Raspberry Pi setup:
- *   sudo apt install alsa-utils fswebcam
- *   sudo pip install pigpio && sudo pigpiod   # for servo PWM
+ * Raspberry Pi setup (Pi 5 / Bookworm / Trixie):
+ *   sudo apt install alsa-utils fswebcam ffmpeg python3-gpiozero python3-lgpio
  *   npm install
- *   node server.js
+ *   npm start
  *
  * Wiring (physical header pins):
  *   Doorbell button : pin 40 (GPIO21) ─ pin 39 (GND)

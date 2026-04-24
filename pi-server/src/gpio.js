@@ -1,77 +1,102 @@
 require('dotenv').config();
+const { spawn } = require('child_process');
+const readline = require('readline');
+const path = require('path');
 
-// BCM numbering. Physical header pin → BCM mapping:
-//   Doorbell button : physical 39 (GND) + 40 (GPIO21)
-//   Servo SG90      : physical 4 (5V) + 6 (GND) + 11 (GPIO17)
-//   Servo button    : physical 7 (GPIO4) + 9 (GND)
-const BELL_PIN = Number(process.env.GPIO_BELL ?? 21);
-const SERVO_PIN = Number(process.env.GPIO_SERVO ?? 17);
-const SERVO_BUTTON_PIN = Number(process.env.GPIO_SERVO_BUTTON ?? 4);
-
-// Servo SG90 pulse widths (microseconds)
-const SERVO_LOCKED = 1500;  // 90° — locked
-const SERVO_OPEN = 500;     // 0°  — unlocked
+const DAEMON_PATH = path.join(__dirname, '..', 'gpio_daemon.py');
 const AUTO_CLOSE_MS = Number(process.env.SERVO_AUTO_CLOSE_MS ?? 5000);
 
-let servo = null;
+let daemon = null;
 let doorStatus = 'closed';
 let autoCloseTimer = null;
+const handlers = { onBell: null, onServoButton: null };
 
-try {
-  const { Gpio } = require('pigpio');
-  servo = new Gpio(SERVO_PIN, { mode: Gpio.OUTPUT });
-  servo.servoWrite(SERVO_LOCKED);
-  console.log(`[gpio] Servo on GPIO ${SERVO_PIN} initialized`);
-} catch {
-  console.warn('[gpio] pigpio unavailable — servo will be mocked (not on Pi or pigpiod not running)');
-}
-
-let onoffGpio = null;
-try {
-  onoffGpio = require('onoff').Gpio;
-} catch {
-  console.warn('[gpio] onoff unavailable — buttons will be mocked');
-}
-
-function watchButton(pin, label, onPress) {
-  if (!onoffGpio) return null;
-  try {
-    const btn = new onoffGpio(pin, 'in', 'falling', { debounceTimeout: 100 });
-    btn.watch((err) => { if (!err) onPress(); });
-    process.on('SIGINT', () => { btn.unexport(); });
-    console.log(`[gpio] ${label} on GPIO ${pin} initialized`);
-    return btn;
-  } catch (e) {
-    console.warn(`[gpio] ${label} init failed:`, e.message);
-    return null;
+function sendCommand(cmd) {
+  if (daemon && daemon.stdin.writable) {
+    daemon.stdin.write(JSON.stringify(cmd) + '\n');
+    return true;
   }
+  return false;
 }
 
 function initGpio(onBell, onServoButton) {
+  handlers.onBell = onBell;
+  handlers.onServoButton = onServoButton;
+
   return new Promise((resolve) => {
-    if (!onoffGpio) {
+    let resolved = false;
+    const markReady = () => { if (!resolved) { resolved = true; resolve(); } };
+
+    try {
+      daemon = spawn('python3', [DAEMON_PATH], {
+        stdio: ['pipe', 'pipe', 'inherit'],
+        env: {
+          ...process.env,
+          GPIO_BELL: process.env.GPIO_BELL ?? '21',
+          GPIO_SERVO: process.env.GPIO_SERVO ?? '17',
+          GPIO_SERVO_BUTTON: process.env.GPIO_SERVO_BUTTON ?? '4',
+        },
+      });
+    } catch (e) {
+      console.warn('[gpio] Failed to spawn Python daemon:', e.message);
       console.log('[gpio] Running in mock mode — POST /bell to simulate press');
-      resolve();
+      markReady();
       return;
     }
-    watchButton(BELL_PIN, 'Doorbell button', onBell);
-    if (onServoButton) watchButton(SERVO_BUTTON_PIN, 'Servo button', onServoButton);
-    process.on('SIGINT', () => process.exit());
-    resolve();
+
+    daemon.on('error', (e) => {
+      console.warn('[gpio] Daemon error:', e.message);
+      markReady();
+    });
+
+    daemon.on('exit', (code) => {
+      console.warn(`[gpio] Daemon exited with code ${code} — running in mock mode`);
+      daemon = null;
+      markReady();
+    });
+
+    const rl = readline.createInterface({ input: daemon.stdout });
+    rl.on('line', (line) => {
+      try {
+        const evt = JSON.parse(line);
+        switch (evt.event) {
+          case 'ready':
+            console.log(`[gpio] Python daemon ready (bell=GPIO${evt.bell}, servo=GPIO${evt.servo}, button=GPIO${evt.servo_button})`);
+            markReady();
+            break;
+          case 'bell':
+            handlers.onBell?.();
+            break;
+          case 'servo_button':
+            handlers.onServoButton?.();
+            break;
+          case 'door_open':
+          case 'door_closed':
+            // State already tracked in Node; event is just for logs
+            break;
+        }
+      } catch {
+        console.log('[gpio-py]', line);
+      }
+    });
+
+    process.on('SIGINT', () => { daemon?.kill(); process.exit(); });
+    process.on('SIGTERM', () => { daemon?.kill(); });
+
+    // Safety net: if daemon never reports ready in 5s, move on (mock)
+    setTimeout(markReady, 5000);
   });
 }
 
 async function controlServo(action) {
-  const pulseWidth = action === 'open' ? SERVO_OPEN : SERVO_LOCKED;
   doorStatus = action === 'open' ? 'open' : 'closed';
-
-  if (servo) {
-    servo.servoWrite(pulseWidth);
+  const ok = sendCommand({ action });
+  if (ok) {
+    console.log(`[gpio] Door ${action}`);
   } else {
-    console.log(`[gpio] [MOCK] Servo ${action} (${pulseWidth}μs)`);
+    console.log(`[gpio] [MOCK] Door ${action}`);
   }
-  console.log(`[gpio] Door ${action}`);
-  return { action, pulseWidth };
+  return { action };
 }
 
 async function openDoorWithAutoClose(onStatusChange) {
