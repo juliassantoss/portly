@@ -2,7 +2,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -14,6 +14,30 @@ import { colors } from "../theme/colors";
 
 type Props = NativeStackScreenProps<RootStackParamList, "LiveIntercom">;
 
+// M4A/AAC — decodable by ffmpeg on any platform
+const RECORDING_OPTIONS: Audio.RecordingOptions = {
+  android: {
+    extension: ".m4a",
+    outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+    audioEncoder: Audio.AndroidAudioEncoder.AAC,
+    sampleRate: 16000,
+    numberOfChannels: 1,
+    bitRate: 32000,
+  },
+  ios: {
+    extension: ".m4a",
+    outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+    audioQuality: Audio.IOSAudioQuality.MEDIUM,
+    sampleRate: 16000,
+    numberOfChannels: 1,
+    bitRate: 32000,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
+  },
+  web: { mimeType: "audio/webm", bitsPerSecond: 32000 },
+};
+
 export function LiveIntercomScreen({ navigation }: Props) {
   const { connected, latestFrame, doorStatus, startStream, stopStream, openDoor, sendAudio } =
     useIntercom({ subscribeFrames: true });
@@ -21,103 +45,116 @@ export function LiveIntercomScreen({ navigation }: Props) {
   const [isTalking, setIsTalking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [doorOpening, setDoorOpening] = useState(false);
-  const [listenSound, setListenSound] = useState<Audio.Sound | null>(null);
+  const [listenStatus, setListenStatus] = useState<"off" | "connecting" | "on" | "error">("off");
 
+  // Refs instead of state so effects always close over the latest object
+  const soundRef = useRef<Audio.Sound | null>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
 
-  // Start video stream when screen opens, stop on leave
+  // Configure audio session once on mount — allowsRecordingIOS stays true the
+  // whole time so PTT and playback can coexist without toggling the mode.
+  useEffect(() => {
+    Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      allowsRecordingIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: false,
+    }).catch(() => {});
+
+    return () => {
+      // Full teardown when leaving the screen
+      soundRef.current?.stopAsync().catch(() => {});
+      soundRef.current?.unloadAsync().catch(() => {});
+      recordingRef.current?.stopAndUnloadAsync().catch(() => {});
+    };
+  }, []);
+
+  // Start video stream
   useEffect(() => {
     if (connected) startStream();
     return () => stopStream();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
 
-  // Start/stop incoming audio stream from Pi HTTP endpoint
+  // Incoming audio stream: Pi mic → phone speaker (MP3 over HTTP)
   useEffect(() => {
+    // Always tear down the previous sound first
+    const prev = soundRef.current;
+    soundRef.current = null;
+    prev?.stopAsync().catch(() => {});
+    prev?.unloadAsync().catch(() => {});
+
     if (isMuted || !connected) {
-      listenSound?.stopAsync().catch(() => {});
-      listenSound?.unloadAsync().catch(() => {});
-      setListenSound(null);
+      setListenStatus("off");
       return;
     }
 
-    let mounted = true;
+    let cancelled = false;
+    setListenStatus("connecting");
+
     Audio.Sound.createAsync(
-      { uri: `${PI_HTTP_URL}/audio` },
-      { shouldPlay: true, isLooping: false, volume: 1.0 },
+      { uri: `${PI_HTTP_URL}/audio-stream` },
+      { shouldPlay: true, volume: 1.0 },
     )
       .then(({ sound }) => {
-        if (!mounted) { sound.unloadAsync(); return; }
-        setListenSound(sound);
+        if (cancelled) {
+          sound.unloadAsync();
+          return;
+        }
+        soundRef.current = sound;
+        setListenStatus("on");
+
+        // Restart stream if it stops unexpectedly (e.g. Pi restarts)
+        sound.setOnPlaybackStatusUpdate((status) => {
+          if (!status.isLoaded && !cancelled) {
+            soundRef.current = null;
+            setListenStatus("error");
+          }
+        });
       })
       .catch(() => {
-        // Microphone stream not available (Pi audio not set up)
+        if (!cancelled) setListenStatus("error");
       });
 
     return () => {
-      mounted = false;
+      cancelled = true;
     };
-  // Re-create sound object only when mute/connection changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMuted, connected]);
+  }, [isMuted, connected]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cleanup sound on unmount
-  useEffect(() => {
-    return () => {
-      listenSound?.stopAsync().catch(() => {});
-      listenSound?.unloadAsync().catch(() => {});
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listenSound]);
-
-  async function startTalking() {
-    if (isTalking) return;
+  const startTalking = useCallback(async () => {
+    if (isTalking || recordingRef.current) return;
+    const { granted } = await Audio.requestPermissionsAsync();
+    if (!granted) return;
     try {
-      const { granted } = await Audio.requestPermissionsAsync();
-      if (!granted) return;
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
-
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.LOW_QUALITY,
-      );
+      const { recording } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
       recordingRef.current = recording;
       setIsTalking(true);
     } catch (e) {
-      console.warn("[audio] Could not start recording:", e);
+      console.warn("[ptt] start failed:", e);
     }
-  }
+  }, [isTalking]);
 
-  async function stopTalking() {
-    if (!isTalking || !recordingRef.current) return;
+  const stopTalking = useCallback(async () => {
+    if (!recordingRef.current) return;
     setIsTalking(false);
-
+    const rec = recordingRef.current;
+    recordingRef.current = null;
     try {
-      await recordingRef.current.stopAndUnloadAsync();
-      const uri = recordingRef.current.getURI();
-      recordingRef.current = null;
-
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
-
+      await rec.stopAndUnloadAsync();
+      const uri = rec.getURI();
       if (!uri) return;
-
-      // Read the recorded file as base64 and send to Pi for playback
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: 'base64',
-      });
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: "base64" });
       sendAudio(base64);
     } catch (e) {
-      console.warn("[audio] Could not send recording:", e);
+      console.warn("[ptt] send failed:", e);
     }
-  }
+  }, [sendAudio]);
 
   function handleOpenDoor() {
     openDoor();
     setDoorOpening(true);
-    setTimeout(() => setDoorOpening(false), 6000);
+    setTimeout(() => setDoorOpening(false), 11000);
   }
 
   const doorLabel = doorOpening
@@ -125,6 +162,17 @@ export function LiveIntercomScreen({ navigation }: Props) {
     : doorStatus === "open"
       ? "Porta aberta"
       : "Abrir porta";
+
+  const audioStatusLabel =
+    isMuted
+      ? "Silenciado"
+      : listenStatus === "on"
+        ? "A ouvir"
+        : listenStatus === "connecting"
+          ? "A ligar…"
+          : listenStatus === "error"
+            ? "Sem audio"
+            : "—";
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -167,15 +215,13 @@ export function LiveIntercomScreen({ navigation }: Props) {
           </View>
         </View>
 
-        {/* Visitor info */}
+        {/* Status */}
         <View style={styles.visitorCard}>
           <Text style={styles.visitorTitle}>
             {connected ? "Visitante aguardando" : "Pi desligado"}
           </Text>
           <Text style={styles.visitorText}>
-            {connected
-              ? `Porta: ${doorStatus === "open" ? "aberta" : "fechada"} · Audio: ${isMuted ? "silenciado" : "ativo"}`
-              : "Inicie o servidor no Raspberry Pi para aceder ao video e audio."}
+            {`Porta: ${doorStatus === "open" ? "aberta" : "fechada"}  ·  Microfone Pi: ${audioStatusLabel}`}
           </Text>
         </View>
 
@@ -187,7 +233,9 @@ export function LiveIntercomScreen({ navigation }: Props) {
               onPressOut={stopTalking}
               style={[styles.pttButton, isTalking && styles.pttButtonActive, styles.flex]}
             >
-              <Text style={styles.pttLabel}>{isTalking ? "A falar…" : "Falar (segurar)"}</Text>
+              <Text style={[styles.pttLabel, isTalking && styles.pttLabelActive]}>
+                {isTalking ? "A falar…" : "Falar (segurar)"}
+              </Text>
             </Pressable>
             <AppButton
               label={isMuted ? "Ativar som" : "Silenciar"}
@@ -196,11 +244,7 @@ export function LiveIntercomScreen({ navigation }: Props) {
               variant="secondary"
             />
           </View>
-          <AppButton
-            label={doorLabel}
-            onPress={handleOpenDoor}
-            variant={doorStatus === "open" || doorOpening ? "secondary" : "secondary"}
-          />
+          <AppButton label={doorLabel} onPress={handleOpenDoor} variant="secondary" />
           <AppButton
             label="Encerrar chamada"
             onPress={() => { stopStream(); navigation.navigate("Home"); }}
@@ -370,5 +414,8 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 15,
     fontWeight: "800",
+  },
+  pttLabelActive: {
+    color: colors.textInverse,
   },
 });

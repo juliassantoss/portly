@@ -14,7 +14,15 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// In Expo Go (SDK 53+) remote push is stripped out. Dev Build / production use full API.
+const isExpoGo = Constants.appOwnership === 'expo';
+
 export async function registerForPushNotifications(): Promise<string | null> {
+  if (isExpoGo) {
+    console.log('[notifications] Skipping push registration in Expo Go — use Dev Build for notifications');
+    return null;
+  }
+
   // Push notifications only work on real devices
   if (!Device.isDevice) {
     console.warn('[notifications] Push tokens only available on physical devices');

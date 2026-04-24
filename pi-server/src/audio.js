@@ -76,20 +76,24 @@ function stopAudioCapture() {
   }
 }
 
-// Play base64-encoded raw PCM audio received from the app
-function playAudioChunk(base64pcm) {
-  if (!playProc || playProc.killed) {
-    try {
-      playProc = spawn('aplay', APLAY_ARGS);
-      playProc.on('error', (e) => console.warn('[audio] aplay error:', e.message));
-    } catch (e) {
-      console.warn('[audio] Could not start aplay:', e.message);
-      return;
-    }
-  }
-  const pcm = Buffer.from(base64pcm, 'base64');
-  if (playProc.stdin.writable) {
-    playProc.stdin.write(pcm);
+// App records each PTT press as a complete M4A/AAC file and sends base64 over WS.
+// Decode via ffmpeg → raw PCM → aplay. Requires `sudo apt install ffmpeg`.
+function playAudioChunk(base64m4a) {
+  try {
+    const buf = Buffer.from(base64m4a, 'base64');
+    const ff = spawn('ffmpeg', [
+      '-loglevel', 'error',
+      '-i', 'pipe:0',
+      '-f', 's16le', '-ar', RATE, '-ac', '1',
+      'pipe:1',
+    ]);
+    const pl = spawn('aplay', APLAY_ARGS);
+    ff.stdout.pipe(pl.stdin);
+    ff.on('error', (e) => console.warn('[audio] ffmpeg not available:', e.message));
+    pl.on('error', (e) => console.warn('[audio] aplay error:', e.message));
+    ff.stdin.end(buf);
+  } catch (e) {
+    console.warn('[audio] playAudioChunk failed:', e.message);
   }
 }
 

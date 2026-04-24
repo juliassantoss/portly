@@ -7,12 +7,22 @@
  *   npm install
  *   node server.js
  *
- * Wiring:
- *   Doorbell button : GPIO 17 (pin 11) — one leg to GPIO, other to GND
- *   Servo SG90      : signal → GPIO 18 (pin 12), VCC → 5V, GND → GND
- *   Microphone      : USB or Pi HAT — first ALSA device
- *   Speaker/Buzzer  : same ALSA device
- *   Camera          : Pi Camera Module (CSI) or USB webcam
+ * Wiring (physical header pins):
+ *   Doorbell button : pin 40 (GPIO21) ─ pin 39 (GND)
+ *   Servo SG90      : signal → pin 11 (GPIO17), VCC → pin 4 (5V), GND → pin 6 (GND)
+ *   Servo button    : pin 7 (GPIO4) ─ pin 9 (GND)  — manual open from outside Pi
+ *   Microphone      : USB webcam or USB mic — first ALSA device
+ *   Speaker         : USB / Bluetooth — default ALSA output
+ *   Camera          : USB webcam (or Pi Camera via libcamera)
+ *
+ * Wire protocol (WebSocket JSON):
+ *   From app → Pi:
+ *     { type: 'command', action: 'answer-call' | 'end-call' | 'open-lock' }
+ *     { type: 'audio-chunk', data: <base64> }
+ *     { type: 'register-expo-token', token: <string> }
+ *   From Pi → app:
+ *     { type: 'video-frame', data: <base64 JPEG> }
+ *     { type: 'event', name: 'device-online' | 'doorbell-pressed' | 'lock-opened' | 'lock-closed' | 'call-started' | 'call-ended', timestamp: <ms> }
  */
 
 require('dotenv').config();
@@ -21,9 +31,9 @@ const http = require('http');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 
-const { initGpio, controlServo, getDoorStatus } = require('./src/gpio');
+const { initGpio, openDoorWithAutoClose, getDoorStatus } = require('./src/gpio');
 const { startCameraStream, stopCameraStream } = require('./src/camera');
-const { pipeAudioToResponse, startAudioCapture, stopAudioCapture, playAudioChunk, stopPlayback } = require('./src/audio');
+const { pipeAudioToResponse, stopAudioCapture, playAudioChunk, stopPlayback } = require('./src/audio');
 const { sendDoorbell } = require('./src/notifications');
 
 const PORT_HTTP = Number(process.env.PORT_HTTP ?? 3000);
@@ -34,7 +44,6 @@ const PORT_WS = Number(process.env.PORT_WS ?? 3001);
 const app = express();
 app.use(express.json());
 
-// Stored push tokens for registered app instances
 const pushTokens = new Set();
 
 app.get('/status', (req, res) => {
@@ -46,13 +55,18 @@ app.get('/status', (req, res) => {
   });
 });
 
-// Live microphone audio stream (expo-av can play this as a WAV HTTP stream)
+// Live microphone stream (expo-av consumes this as a WAV HTTP stream)
+app.get('/audio-stream', (req, res) => {
+  const ok = pipeAudioToResponse(res);
+  if (!ok) res.status(503).json({ error: 'Microphone not available' });
+});
+
+// Back-compat alias — older builds still call /audio
 app.get('/audio', (req, res) => {
   const ok = pipeAudioToResponse(res);
   if (!ok) res.status(503).json({ error: 'Microphone not available' });
 });
 
-// Register Expo push token from the app (also sent over WebSocket on connect)
 app.post('/register-token', (req, res) => {
   const { token } = req.body ?? {};
   if (!token) return res.status(400).json({ error: 'token required' });
@@ -61,18 +75,12 @@ app.post('/register-token', (req, res) => {
   res.json({ ok: true, total: pushTokens.size });
 });
 
-// Open door via HTTP (useful for testing without the app)
+// HTTP fallbacks for hardware-free testing
 app.post('/open-door', async (req, res) => {
-  await controlServo('open');
-  broadcast({ type: 'door_status', status: 'open' });
-  setTimeout(async () => {
-    await controlServo('close');
-    broadcast({ type: 'door_status', status: 'closed' });
-  }, 5000);
-  res.json({ status: 'open', closesInMs: 5000 });
+  await openDoorWithAutoClose((status) => emitLockStatus(status));
+  res.json({ status: 'open' });
 });
 
-// Simulate bell press for testing without hardware
 app.post('/bell', (req, res) => {
   handleBellPress();
   res.json({ ok: true });
@@ -95,48 +103,40 @@ function broadcast(msg) {
   }
 }
 
+function emitEvent(name, extra = {}) {
+  broadcast({ type: 'event', name, timestamp: Date.now(), ...extra });
+}
+
+function emitLockStatus(status) {
+  emitEvent(status === 'open' ? 'lock-opened' : 'lock-closed');
+}
+
 wss.on('connection', (ws) => {
   console.log('[ws] App connected (total:', wss.clients.size, ')');
+  ws.send(JSON.stringify({ type: 'event', name: 'device-online', timestamp: Date.now() }));
 
   ws.on('message', async (raw) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
 
     switch (msg.type) {
-      case 'register_token':
+      case 'register-expo-token':
         if (msg.token) {
           pushTokens.add(msg.token);
           console.log('[ws] Push token registered via WS');
         }
         break;
 
-      case 'start_stream':
-        startCameraStream((frame) => {
-          if (ws.readyState === 1) {
-            ws.send(JSON.stringify({ type: 'frame', data: frame }));
-          }
-        });
-        // Audio is available via HTTP /audio endpoint — no WS audio out needed
+      case 'command':
+        await handleCommand(ws, msg.action);
         break;
 
-      case 'stop_stream':
-        stopCameraStream();
-        stopAudioCapture();
-        break;
-
-      case 'open_door':
-        await controlServo('open');
-        broadcast({ type: 'door_status', status: 'open' });
-        setTimeout(async () => {
-          await controlServo('close');
-          broadcast({ type: 'door_status', status: 'closed' });
-        }, 5000);
-        break;
-
-      case 'audio_chunk':
-        // PTT audio received from app — play on Pi speaker
+      case 'audio-chunk':
         if (msg.data) playAudioChunk(msg.data);
         break;
+
+      default:
+        console.warn('[ws] Unknown message type:', msg.type);
     }
   });
 
@@ -146,18 +146,44 @@ wss.on('connection', (ws) => {
       stopCameraStream();
       stopAudioCapture();
       stopPlayback();
+      emitEvent('call-ended');
     }
   });
 
   ws.on('error', (e) => console.warn('[ws] Client error:', e.message));
 });
 
+async function handleCommand(ws, action) {
+  switch (action) {
+    case 'answer-call':
+      startCameraStream((frame) => {
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'video-frame', data: frame }));
+        }
+      });
+      emitEvent('call-started');
+      break;
+
+    case 'end-call':
+      stopCameraStream();
+      stopAudioCapture();
+      emitEvent('call-ended');
+      break;
+
+    case 'open-lock':
+      await openDoorWithAutoClose((status) => emitLockStatus(status));
+      break;
+
+    default:
+      console.warn('[ws] Unknown command action:', action);
+  }
+}
+
 // ── Doorbell handler ─────────────────────────────────────────────────────────
 
 function handleBellPress() {
   console.log('[bell] Pressed!');
-
-  broadcast({ type: 'bell', timestamp: new Date().toISOString() });
+  emitEvent('doorbell-pressed');
 
   for (const token of pushTokens) {
     sendDoorbell(token).catch(() => {});
@@ -166,6 +192,11 @@ function handleBellPress() {
 
 // ── GPIO init ────────────────────────────────────────────────────────────────
 
-initGpio(handleBellPress).catch((e) =>
+function handleServoButton() {
+  console.log('[servo-button] Pressed — opening door manually');
+  openDoorWithAutoClose((status) => emitLockStatus(status));
+}
+
+initGpio(handleBellPress, handleServoButton).catch((e) =>
   console.warn('[gpio] Init error:', e.message)
 );
