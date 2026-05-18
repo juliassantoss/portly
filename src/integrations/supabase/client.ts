@@ -1,19 +1,13 @@
-import { hasSupabaseConfig, supabaseConfig } from "./config";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { createClient } from "@supabase/supabase-js";
 
-export type SupabaseSetupState =
-  | { configured: false; reason: string }
-  | { configured: true; url: string };
+import { supabaseConfig } from "./config";
 
-export function getSupabaseSetupState(): SupabaseSetupState {
-  if (!hasSupabaseConfig()) {
-    return {
-      configured: false,
-      reason: "Define EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY.",
-    };
-  }
-
-  return {
-    configured: true,
-    url: supabaseConfig.url,
-  };
-}
+export const supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey, {
+  auth: {
+    storage: AsyncStorage,
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});

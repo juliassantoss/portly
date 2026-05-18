@@ -7,47 +7,22 @@ import { colors } from "../theme/colors";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Settings">;
 
-const rows = [
-  ["Camera", "Mock visual ativo"],
-  ["Raspberry Pi", "Aguardando contrato da bridge"],
-  ["Supabase", "Variaveis preparadas"],
-  ["Fechadura", "Acao simulada"],
-  ["Expo Go", "Compativel nesta fase"],
-];
-
 export function SettingsScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.header}>
           <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Text style={styles.backText}>Voltar</Text>
+            <Text style={styles.backArrow}>←</Text>
           </Pressable>
-          <Text style={styles.title}>Sistema</Text>
+          <Text style={styles.title}>Definições</Text>
         </View>
 
         <View style={styles.deviceCard}>
           <Text style={styles.cardKicker}>Dispositivo</Text>
           <Text style={styles.cardTitle}>Porta principal</Text>
           <Text style={styles.cardText}>
-            Area para configurar a camera, microfone, campainha e comandos do Raspberry Pi.
-          </Text>
-        </View>
-
-        <View style={styles.listCard}>
-          {rows.map(([label, value]) => (
-            <View key={label} style={styles.row}>
-              <Text style={styles.rowLabel}>{label}</Text>
-              <Text style={styles.rowValue}>{value}</Text>
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.notice}>
-          <Text style={styles.noticeTitle}>Importante para Expo Go</Text>
-          <Text style={styles.noticeText}>
-            Video real, audio bidirecional e hardware podem exigir build de desenvolvimento
-            quando forem implementados. Agora estas telas sao apenas a base visual.
+            Área para configurar a câmera, microfone, campainha e comandos do Raspberry Pi.
           </Text>
         </View>
       </ScrollView>
@@ -71,15 +46,17 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   backButton: {
+    alignItems: "center",
     backgroundColor: colors.surfaceAlt,
     borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
   },
-  backText: {
+  backArrow: {
     color: colors.primary,
-    fontSize: 14,
-    fontWeight: "900",
+    fontSize: 20,
+    fontWeight: "700",
   },
   title: {
     color: colors.text,
@@ -107,43 +84,5 @@ const styles = StyleSheet.create({
     color: "#dceaff",
     fontSize: 15,
     lineHeight: 22,
-  },
-  listCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 24,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  row: {
-    borderBottomColor: colors.border,
-    borderBottomWidth: 1,
-    gap: 6,
-    padding: 18,
-  },
-  rowLabel: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: "900",
-  },
-  rowValue: {
-    color: colors.textMuted,
-    fontSize: 14,
-  },
-  notice: {
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: 24,
-    gap: 8,
-    padding: 18,
-  },
-  noticeTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "900",
-  },
-  noticeText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    lineHeight: 21,
   },
 });

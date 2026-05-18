@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 
 import { colors } from "../theme/colors";
 
@@ -20,55 +20,21 @@ export function PortlyLogo({
   centered = false,
 }: PortlyLogoProps) {
   const markSize = markSizes[size];
-  const lensSize = markSize * 0.52;
-  const innerLensSize = markSize * 0.26;
-  const doorWidth = markSize * 0.38;
 
   return (
     <View style={[styles.container, centered && styles.centered]}>
-      <View
+      <Image
+        source={require("../../assets/logo.png")}
         style={[
-          styles.mark,
+          styles.logo,
           {
             width: markSize,
             height: markSize,
             borderRadius: markSize * 0.22,
           },
         ]}
-      >
-        <View
-          style={[
-            styles.cameraRing,
-            {
-              width: lensSize,
-              height: lensSize,
-              borderRadius: lensSize / 2,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.cameraLens,
-              {
-                width: innerLensSize,
-                height: innerLensSize,
-                borderRadius: innerLensSize / 2,
-              },
-            ]}
-          />
-        </View>
-        <View
-          style={[
-            styles.door,
-            {
-              width: doorWidth,
-              height: markSize * 0.34,
-              borderTopLeftRadius: doorWidth / 2,
-              borderTopRightRadius: doorWidth / 2,
-            },
-          ]}
-        />
-      </View>
+        resizeMode="contain"
+      />
 
       {showWordmark ? (
         <Text style={[styles.wordmark, size === "large" && styles.largeWordmark]}>
@@ -88,26 +54,8 @@ const styles = StyleSheet.create({
   centered: {
     justifyContent: "center",
   },
-  mark: {
-    alignItems: "center",
-    backgroundColor: colors.primary,
-    justifyContent: "center",
+  logo: {
     overflow: "hidden",
-  },
-  cameraRing: {
-    alignItems: "center",
-    backgroundColor: colors.textInverse,
-    justifyContent: "center",
-    marginBottom: 10,
-  },
-  cameraLens: {
-    backgroundColor: colors.primaryDark,
-    borderColor: colors.accent,
-    borderWidth: 3,
-  },
-  door: {
-    backgroundColor: colors.textInverse,
-    marginTop: 2,
   },
   wordmark: {
     color: colors.primary,

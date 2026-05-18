@@ -28,7 +28,7 @@ export function HomeScreen({ navigation }: Props) {
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Ola, Julia</Text>
+            <Text style={styles.greeting}>Olá, Júlia</Text>
             <Text style={styles.subtitle}>
               {connected ? "Porta principal monitorada" : "A ligar ao videoporteiro…"}
             </Text>
@@ -57,17 +57,17 @@ export function HomeScreen({ navigation }: Props) {
               <View style={styles.previewLens} />
             </View>
             <Text style={styles.previewTitle}>
-              {connected ? "Pi ligado" : "Pi desligado"}
+              {connected ? "Câmera ativa" : "Câmera indisponível"}
             </Text>
             <Text style={styles.previewText}>
               {connected
-                ? 'Toque em "Abrir camera ao vivo" para ver o feed.'
-                : "Ligue o servidor no Raspberry Pi para ativar a camera."}
+                ? 'Toque em "Abrir câmera ao vivo" para ver o feed.'
+                : "A câmera ainda não está disponível. Tente novamente mais tarde."}
             </Text>
           </View>
 
           <AppButton
-            label="Abrir camera ao vivo"
+            label="Abrir câmera ao vivo"
             onPress={() => navigation.navigate("LiveIntercom")}
           />
         </View>
@@ -99,29 +99,19 @@ export function HomeScreen({ navigation }: Props) {
 
         <View style={styles.grid}>
           <AppButton
-            label="Historico"
+            label="Histórico"
             onPress={() => navigation.navigate("Activity")}
             style={styles.gridButton}
             variant="secondary"
           />
           <AppButton
-            label="Definicoes"
+            label="Definições"
             onPress={() => navigation.navigate("Settings")}
             style={styles.gridButton}
             variant="secondary"
           />
         </View>
 
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>Estado do sistema</Text>
-          <Text style={styles.infoLine}>
-            Raspberry Pi: {connected ? "ligado" : "desligado"}
-          </Text>
-          <Text style={styles.infoLine}>
-            Campainha: {hasBell ? "tocou recentemente" : "sem eventos"}
-          </Text>
-          <Text style={styles.infoLine}>Expo Go: compativel</Text>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -202,8 +192,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundDark,
     borderRadius: 24,
     justifyContent: "center",
-    minHeight: 230,
-    padding: 24,
+    minHeight: 300,
+    padding: 36,
+    gap: 8,
   },
   previewCamera: {
     alignItems: "center",
@@ -268,22 +259,5 @@ const styles = StyleSheet.create({
   },
   gridButton: {
     flex: 1,
-  },
-  infoCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 22,
-    borderWidth: 1,
-    gap: 8,
-    padding: 18,
-  },
-  infoTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "800",
-  },
-  infoLine: {
-    color: colors.textMuted,
-    fontSize: 14,
   },
 });

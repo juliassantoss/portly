@@ -10,32 +10,10 @@
     ],
     "ios": {
       "bundleIdentifier": "com.portly.app",
-      "supportsTablet": true,
-      "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
-      }
+      "supportsTablet": true
     },
     "android": {
-      "package": "com.portly.app",
-      "permissions": [
-        "VIBRATE",
-        "RECEIVE_BOOT_COMPLETED",
-        "RECORD_AUDIO"
-      ]
-    },
-    "plugins": [
-      [
-        "expo-notifications",
-        {
-          "color": "#2563eb"
-        }
-      ],
-      [
-        "expo-av",
-        {
-          "microphonePermission": "Permitir que o Portly use o microfone para falar com o visitante."
-        }
-      ]
-    ]
+      "package": "com.portly.app"
+    }
   }
 }

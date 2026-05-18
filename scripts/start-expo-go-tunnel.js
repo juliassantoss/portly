@@ -1,4 +1,5 @@
 const { spawn } = require("node:child_process");
+const { URL } = require("node:url");
 
 async function main() {
   const token = process.env.NGROK_AUTHTOKEN;
@@ -10,6 +11,7 @@ async function main() {
   }
 
   const ngrok = require("@ngrok/ngrok");
+  const qrcode = require("qrcode-terminal");
   const metroPort = 8081;
 
   console.log(`Starting ngrok tunnel for Metro on port ${metroPort}...`);
@@ -30,22 +32,25 @@ async function main() {
   console.log("Starting Expo with the tunnel URL injected into the QR code...");
   console.log("");
 
-  const expoCommand = "npx expo start --localhost -c";
-  const expo = process.platform === "win32"
-    ? spawn("cmd.exe", ["/d", "/s", "/c", expoCommand], {
-        env: {
-          ...process.env,
-          EXPO_PACKAGER_PROXY_URL: tunnelUrl,
-        },
-        stdio: "inherit",
-      })
-    : spawn("npx", ["expo", "start", "--localhost", "-c"], {
+  const parsedTunnelUrl = new URL(tunnelUrl);
+  const directExpoUrl = `exp://${parsedTunnelUrl.hostname}:${parsedTunnelUrl.port || "443"}`;
+  const loadingUrl = `${tunnelUrl.replace(/\/$/, "")}/_expo/loading`;
+  const expoCliPath = require.resolve("expo/bin/cli");
+
+  const expo = spawn(process.execPath, [expoCliPath, "start", "-c"], {
     env: {
       ...process.env,
       EXPO_PACKAGER_PROXY_URL: tunnelUrl,
+      EXPO_NO_REDIRECT_PAGE: "1",
     },
     stdio: "inherit",
   });
+
+  console.log(`Fallback Expo Go URL: ${directExpoUrl}`);
+  console.log(`Fallback tunnel loading URL: ${loadingUrl}`);
+  console.log("");
+  qrcode.generate(directExpoUrl, { small: true });
+  console.log("");
 
   const shutdown = async () => {
     try {
