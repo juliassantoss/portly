@@ -10,10 +10,19 @@
     ],
     "ios": {
       "bundleIdentifier": "com.portly.app",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "A aplicação precisa de acesso ao microfone para permitir comunicação por áudio com o visitante."
+      }
     },
     "android": {
-      "package": "com.portly.app"
+      "package": "com.portly.app",
+      "permissions": [
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "BLUETOOTH",
+        "BLUETOOTH_CONNECT"
+      ]
     }
   }
 }
