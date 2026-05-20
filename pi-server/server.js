@@ -7,9 +7,9 @@
  *   npm start
  *
  * Wiring (physical header pins):
- *   Doorbell button : pin 40 (GPIO21) ─ pin 39 (GND)
- *   Servo SG90      : signal → pin 11 (GPIO17), VCC → pin 4 (5V), GND → pin 6 (GND)
- *   Servo button    : pin 7 (GPIO4) ─ pin 9 (GND)  — manual open from outside Pi
+ *   Doorbell button : pin 3 (GPIO2) ─ pin 6 (GND)
+ *   Servo SG90      : signal → pin 11 (GPIO17), 5V/GND from external PSU (common GND with Pi)
+ *   LCD 1602 (4-bit): RS=27, E=29, D4=31, D5=33, D6=35, D7=37 (GPIO 0/5/6/13/19/26)
  *   Microphone      : USB webcam or USB mic — first ALSA device
  *   Speaker         : USB / Bluetooth — default ALSA output
  *   Camera          : USB webcam (or Pi Camera via libcamera)
@@ -30,7 +30,7 @@ const http = require('http');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 
-const { initGpio, openDoorWithAutoClose, getDoorStatus } = require('./src/gpio');
+const { initGpio, openDoorWithAutoClose, getDoorStatus, setDisplay, setLed } = require('./src/gpio');
 const { startCameraStream, stopCameraStream } = require('./src/camera');
 const { pipeAudioToResponse, stopAudioCapture, playAudioChunk, stopPlayback } = require('./src/audio');
 const { sendDoorbell } = require('./src/notifications');
@@ -106,7 +106,29 @@ function emitEvent(name, extra = {}) {
   broadcast({ type: 'event', name, timestamp: Date.now(), ...extra });
 }
 
+// ── Display + LED state ──────────────────────────────────────────────────────
+
+let activeCall = false;
+let doorOpen = false;
+let bellRingingTimer = null;
+let doorbellSessionActive = false;
+
+function refreshDisplay() {
+  if (doorOpen) return setDisplay('Porta aberta', '');
+  if (activeCall) return setDisplay('Em chamada', '');
+  if (bellRingingTimer) return setDisplay('A tocar!', '');
+  setDisplay('Portly', 'Pronto');
+}
+
+function endDoorbellSession() {
+  if (!doorbellSessionActive) return;
+  doorbellSessionActive = false;
+  setLed(false);
+}
+
 function emitLockStatus(status) {
+  doorOpen = status === 'open';
+  refreshDisplay();
   emitEvent(status === 'open' ? 'lock-opened' : 'lock-closed');
 }
 
@@ -145,6 +167,9 @@ wss.on('connection', (ws) => {
       stopCameraStream();
       stopAudioCapture();
       stopPlayback();
+      activeCall = false;
+      endDoorbellSession();
+      refreshDisplay();
       emitEvent('call-ended');
     }
   });
@@ -160,12 +185,18 @@ async function handleCommand(ws, action) {
           ws.send(JSON.stringify({ type: 'video-frame', data: frame }));
         }
       });
+      activeCall = true;
+      if (bellRingingTimer) { clearTimeout(bellRingingTimer); bellRingingTimer = null; }
+      refreshDisplay();
       emitEvent('call-started');
       break;
 
     case 'end-call':
       stopCameraStream();
       stopAudioCapture();
+      activeCall = false;
+      endDoorbellSession();
+      refreshDisplay();
       emitEvent('call-ended');
       break;
 
@@ -180,8 +211,19 @@ async function handleCommand(ws, action) {
 
 // ── Doorbell handler ─────────────────────────────────────────────────────────
 
+const BELL_RINGING_TIMEOUT_MS = 30_000;
+
 function handleBellPress() {
   console.log('[bell] Pressed!');
+  doorbellSessionActive = true;
+  setLed(true);
+  if (bellRingingTimer) clearTimeout(bellRingingTimer);
+  bellRingingTimer = setTimeout(() => {
+    bellRingingTimer = null;
+    if (!activeCall) endDoorbellSession();
+    refreshDisplay();
+  }, BELL_RINGING_TIMEOUT_MS);
+  refreshDisplay();
   emitEvent('doorbell-pressed');
 
   for (const token of pushTokens) {
@@ -191,11 +233,6 @@ function handleBellPress() {
 
 // ── GPIO init ────────────────────────────────────────────────────────────────
 
-function handleServoButton() {
-  console.log('[servo-button] Pressed — opening door manually');
-  openDoorWithAutoClose((status) => emitLockStatus(status));
-}
-
-initGpio(handleBellPress, handleServoButton).catch((e) =>
-  console.warn('[gpio] Init error:', e.message)
-);
+initGpio(handleBellPress)
+  .then(() => refreshDisplay())
+  .catch((e) => console.warn('[gpio] Init error:', e.message));

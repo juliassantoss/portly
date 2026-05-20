@@ -9,7 +9,7 @@ const AUTO_CLOSE_MS = Number(process.env.SERVO_AUTO_CLOSE_MS ?? 5000);
 let daemon = null;
 let doorStatus = 'closed';
 let autoCloseTimer = null;
-const handlers = { onBell: null, onServoButton: null };
+const handlers = { onBell: null };
 
 function sendCommand(cmd) {
   if (daemon && daemon.stdin.writable) {
@@ -19,9 +19,8 @@ function sendCommand(cmd) {
   return false;
 }
 
-function initGpio(onBell, onServoButton) {
+function initGpio(onBell) {
   handlers.onBell = onBell;
-  handlers.onServoButton = onServoButton;
 
   return new Promise((resolve) => {
     let resolved = false;
@@ -32,9 +31,8 @@ function initGpio(onBell, onServoButton) {
         stdio: ['pipe', 'pipe', 'inherit'],
         env: {
           ...process.env,
-          GPIO_BELL: process.env.GPIO_BELL ?? '21',
+          GPIO_BELL: process.env.GPIO_BELL ?? '2',
           GPIO_SERVO: process.env.GPIO_SERVO ?? '17',
-          GPIO_SERVO_BUTTON: process.env.GPIO_SERVO_BUTTON ?? '4',
         },
       });
     } catch (e) {
@@ -61,14 +59,14 @@ function initGpio(onBell, onServoButton) {
         const evt = JSON.parse(line);
         switch (evt.event) {
           case 'ready':
-            console.log(`[gpio] Python daemon ready (bell=GPIO${evt.bell}, servo=GPIO${evt.servo}, button=GPIO${evt.servo_button})`);
+            console.log(`[gpio] Python daemon ready (bell=GPIO${evt.bell}, servo=GPIO${evt.servo}, led=GPIO${evt.led}, lcd=${evt.lcd ? 'ok' : 'off'})`);
             markReady();
+            break;
+          case 'lcd_error':
+            console.warn('[gpio] LCD init failed:', evt.message);
             break;
           case 'bell':
             handlers.onBell?.();
-            break;
-          case 'servo_button':
-            handlers.onServoButton?.();
             break;
           case 'door_open':
           case 'door_closed':
@@ -86,6 +84,14 @@ function initGpio(onBell, onServoButton) {
     // Safety net: if daemon never reports ready in 5s, move on (mock)
     setTimeout(markReady, 5000);
   });
+}
+
+function setDisplay(line1 = '', line2 = '') {
+  sendCommand({ action: 'lcd', line1, line2 });
+}
+
+function setLed(on) {
+  sendCommand({ action: 'led', on: !!on });
 }
 
 async function controlServo(action) {
@@ -114,4 +120,4 @@ function getDoorStatus() {
   return doorStatus;
 }
 
-module.exports = { initGpio, controlServo, openDoorWithAutoClose, getDoorStatus, AUTO_CLOSE_MS };
+module.exports = { initGpio, controlServo, openDoorWithAutoClose, getDoorStatus, setDisplay, setLed, AUTO_CLOSE_MS };
