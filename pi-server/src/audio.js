@@ -14,42 +14,35 @@ let playProc = null;
 const ARECORD_ARGS = ['-D', INPUT_DEVICE, '-f', 'S16_LE', '-r', RATE, '-c', '1', '-t', 'raw'];
 const APLAY_ARGS = ['-D', OUTPUT_DEVICE, '-f', 'S16_LE', '-r', RATE, '-c', '1', '-t', 'raw'];
 
-// Write a WAV header so HTTP clients (expo-av) can stream the audio
-function wavHeader(sampleRate = 16000, channels = 1, bitDepth = 16) {
-  const h = Buffer.alloc(44);
-  h.write('RIFF', 0, 'ascii');
-  h.writeUInt32LE(0xffffffff, 4);      // unknown size (streaming)
-  h.write('WAVE', 8, 'ascii');
-  h.write('fmt ', 12, 'ascii');
-  h.writeUInt32LE(16, 16);             // chunk size
-  h.writeUInt16LE(1, 20);              // PCM
-  h.writeUInt16LE(channels, 22);
-  h.writeUInt32LE(sampleRate, 24);
-  h.writeUInt32LE(sampleRate * channels * (bitDepth / 8), 28);
-  h.writeUInt16LE(channels * (bitDepth / 8), 32);
-  h.writeUInt16LE(bitDepth, 34);
-  h.write('data', 36, 'ascii');
-  h.writeUInt32LE(0xffffffff, 40);     // unknown data size (streaming)
-  return h;
-}
-
-// Stream Pi microphone audio as WAV to an HTTP response (for expo-av playback)
+// Stream Pi microphone audio as MP3 to an HTTP response.
+// MP3 streams reliably on Android (ExoPlayer) and iOS (AVPlayer) — much more
+// compatible than chunked WAV with unknown size.
 function pipeAudioToResponse(res) {
-  res.setHeader('Content-Type', 'audio/wav');
-  res.setHeader('Transfer-Encoding', 'chunked');
+  res.setHeader('Content-Type', 'audio/mpeg');
   res.setHeader('Cache-Control', 'no-cache');
 
   try {
     const rec = spawn('arecord', ARECORD_ARGS);
-    res.write(wavHeader(Number(RATE)));
-    rec.stdout.pipe(res);
+    const ff = spawn('ffmpeg', [
+      '-loglevel', 'error',
+      '-f', 's16le', '-ar', RATE, '-ac', '1', '-i', 'pipe:0',
+      '-f', 'mp3', '-b:a', '32k', '-acodec', 'libmp3lame',
+      'pipe:1',
+    ]);
+
+    rec.stdout.pipe(ff.stdin);
+    ff.stdout.pipe(res);
 
     rec.on('error', (e) => {
       console.warn('[audio] arecord error:', e.message);
+      ff.kill();
       res.end();
     });
+    ff.stderr.on('data', (d) => console.warn('[audio][ff-stream]', d.toString().trim()));
+    ff.on('error', (e) => { console.warn('[audio] ffmpeg stream error:', e.message); res.end(); });
 
-    res.on('close', () => rec.kill());
+    res.on('close', () => { rec.kill(); ff.kill(); });
+    console.log('[audio] /audio-stream started (MP3)');
     return true;
   } catch (e) {
     console.warn('[audio] Could not start arecord:', e.message);
@@ -86,6 +79,7 @@ function stopAudioCapture() {
 function playAudioChunk(base64m4a) {
   try {
     const buf = Buffer.from(base64m4a, 'base64');
+    console.log(`[audio] playing chunk (${buf.length} bytes) → ${OUTPUT_DEVICE}`);
     const ff = spawn('ffmpeg', [
       '-loglevel', 'error',
       '-i', 'pipe:0',
@@ -95,7 +89,10 @@ function playAudioChunk(base64m4a) {
     const pl = spawn('aplay', APLAY_ARGS);
     ff.stdout.pipe(pl.stdin);
     ff.on('error', (e) => console.warn('[audio] ffmpeg not available:', e.message));
+    ff.stderr.on('data', (d) => console.warn('[audio][ffmpeg]', d.toString().trim()));
     pl.on('error', (e) => console.warn('[audio] aplay error:', e.message));
+    pl.stderr.on('data', (d) => console.warn('[audio][aplay]', d.toString().trim()));
+    pl.on('close', (code) => console.log(`[audio] aplay exited ${code}`));
     ff.stdin.end(buf);
   } catch (e) {
     console.warn('[audio] playAudioChunk failed:', e.message);

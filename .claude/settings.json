@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ping -n 2 portly.local)",
+      "Bash(ping -c 2 portly.local)",
+      "Bash(ssh -o ConnectTimeout=10 portly@portly.local \"hostname\")",
+      "Bash(ssh portly@portly.local 'python3 -c \" *)",
+      "Bash(ssh portly@portly.local 'pm2 stop portly && sleep 2 && python3 -c \" *)",
+      "Bash(ssh portly@portly.local \"pm2 stop portly ; sleep 2 ; sudo lsof /dev/gpiochip0 2>&1 | head -5\")",
+      "Bash(ssh portly@portly.local 'python3 -c '\\\\'' *)",
+      "Bash(ssh portly@portly.local 'pm2 stop portly 2>/dev/null ; sleep 2 ; python3 -c '\\\\'' *)",
+      "Bash(ssh portly@portly.local \"echo '=== pinctrl funcs ===' && pinctrl 2>&1 | head -50 ; echo '=== gpioinfo summary \\(claimed\\) ===' && gpioinfo 2>&1 | grep -E 'consumer=' | head -20 ; echo '=== pm2 ===' && pm2 list 2>&1 | tail -3\")",
+      "Bash(ssh portly@portly.local 'pm2 stop portly 2>/dev/null ; sleep 2 ; echo '\\\\''=== Pinos LCD esperados ==='\\\\'' ; echo '\\\\''RS=GPIO26 \\(pin 37\\), E=GPIO19 \\(pin 35\\), D4=GPIO13 \\(pin 33\\), D5=GPIO6 \\(pin 31\\), D6=GPIO5 \\(pin 29\\), D7=GPIO16 \\(pin 36\\)'\\\\'' ; echo '\\\\'''\\\\'' ; echo '\\\\''=== Estado actual destes pinos ==='\\\\'' ; pinctrl 26 19 13 6 5 16 2 17 21 ; echo '\\\\'''\\\\'' ; echo '\\\\''=== Quem está a usar gpiochip0 ==='\\\\'' ; sudo -n lsof /dev/gpiochip0 2>/dev/null | grep -v COMMAND || echo '\\\\''ninguém'\\\\'' ; echo '\\\\'''\\\\'' ; echo '\\\\''=== Test write/read em cada pino LCD ==='\\\\'' ; python3 -c '\\\\'' *)",
+      "Bash(ssh portly@portly.local 'pm2 stop portly 2>/dev/null ; sleep 2 ; echo '\\\\''=== TEST 1: GPIO write/read em todos os pinos LCD ==='\\\\'' ; python3 -c '\\\\'' *)",
+      "Bash(ssh portly@portly.local *)",
+      "Bash(ipconfig)",
+      "Bash(git -C c:/portly status --short)",
+      "Bash(git -C c:/portly add pi-server/gpio_daemon.py pi-server/src/audio.js pi-server/src/camera.js pi-server/lcd_test.py src/integrations/supabase/client.ts src/screens/ActivityScreen.tsx src/screens/LoginScreen.tsx)",
+      "Bash(git -C c:/portly commit -m ' *)",
+      "Bash(cat /c/Users/TRENDI~1/AppData/Local/Temp/claude/c--portly/c968087c-c44d-40c9-8e65-cd9520661f5c/tasks/bk8kv8m2v.output 2>&1)",
+      "Read(//c/Users/TRENDI~1/AppData/Local/Temp/claude/c--portly/c968087c-c44d-40c9-8e65-cd9520661f5c/tasks/**)",
+      "Bash(scp -o BatchMode=yes c:/portly/pi-server/server.js portly@portly.local:/home/portly/portly/pi-server/server.js)",
+      "Bash(scp -o BatchMode=yes c:/portly/pi-server/server.js c:/portly/pi-server/src/audio.js portly@portly.local:/tmp/)"
+    ]
+  }
+}

@@ -93,6 +93,7 @@ export function LiveIntercomScreen({ navigation }: Props) {
     let cancelled = false;
     setListenStatus("connecting");
 
+    console.log("[audio] trying to load:", `${PI_HTTP_URL}/audio-stream`);
     Audio.Sound.createAsync(
       { uri: `${PI_HTTP_URL}/audio-stream` },
       { shouldPlay: true, volume: 1.0 },
@@ -104,16 +105,19 @@ export function LiveIntercomScreen({ navigation }: Props) {
         }
         soundRef.current = sound;
         setListenStatus("on");
+        console.log("[audio] stream loaded OK");
 
         // Restart stream if it stops unexpectedly (e.g. Pi restarts)
         sound.setOnPlaybackStatusUpdate((status) => {
           if (!status.isLoaded && !cancelled) {
             soundRef.current = null;
             setListenStatus("error");
+            console.log("[audio] stream ended unexpectedly");
           }
         });
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error("[audio] createAsync failed:", err?.message ?? err);
         if (!cancelled) setListenStatus("error");
       });
 

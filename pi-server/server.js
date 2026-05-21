@@ -31,6 +31,19 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 
 const { initGpio, openDoorWithAutoClose, getDoorStatus, setDisplay, setLed } = require('./src/gpio');
+const { spawn } = require('child_process');
+
+const BT_SPEAKER_MAC = process.env.BT_SPEAKER_MAC ?? '41:42:50:87:45:07';
+
+function reconnectBtSpeaker() {
+  // Fire-and-forget bluetoothctl connect. Idempotent — does nothing if already connected.
+  const bt = spawn('bluetoothctl', ['connect', BT_SPEAKER_MAC]);
+  bt.on('close', (code) => {
+    if (code === 0) console.log('[bt] reconnected to', BT_SPEAKER_MAC);
+    else console.log('[bt] connect attempt exited', code);
+  });
+  bt.on('error', (e) => console.warn('[bt] bluetoothctl error:', e.message));
+}
 const { startCameraStream, stopCameraStream } = require('./src/camera');
 const { pipeAudioToResponse, stopAudioCapture, playAudioChunk, stopPlayback } = require('./src/audio');
 const { sendDoorbell } = require('./src/notifications');
@@ -56,12 +69,14 @@ app.get('/status', (req, res) => {
 
 // Live microphone stream (expo-av consumes this as a WAV HTTP stream)
 app.get('/audio-stream', (req, res) => {
+  console.log('[http] /audio-stream requested by', req.ip);
   const ok = pipeAudioToResponse(res);
   if (!ok) res.status(503).json({ error: 'Microphone not available' });
 });
 
 // Back-compat alias — older builds still call /audio
 app.get('/audio', (req, res) => {
+  console.log('[http] /audio requested by', req.ip);
   const ok = pipeAudioToResponse(res);
   if (!ok) res.status(503).json({ error: 'Microphone not available' });
 });
@@ -140,6 +155,12 @@ wss.on('connection', (ws) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
 
+    // Log every incoming message (truncate audio data for readability)
+    const logged = msg.type === 'audio-chunk'
+      ? { type: msg.type, dataLen: (msg.data ?? '').length }
+      : msg;
+    console.log('[ws] ←', JSON.stringify(logged));
+
     switch (msg.type) {
       case 'register-expo-token':
         if (msg.token) {
@@ -180,6 +201,7 @@ wss.on('connection', (ws) => {
 async function handleCommand(ws, action) {
   switch (action) {
     case 'answer-call':
+      reconnectBtSpeaker(); // wake BT speaker for outgoing audio
       startCameraStream((frame) => {
         if (ws.readyState === 1) {
           ws.send(JSON.stringify({ type: 'video-frame', data: frame }));
