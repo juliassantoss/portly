@@ -48,6 +48,10 @@ export function ActivityScreen({ navigation }: Props) {
 
   useEffect(() => {
     async function fetchEvents() {
+      if (!supabase) {
+        setLoading(false);
+        return;
+      }
       const { data, error } = await supabase
         .from("events")
         .select("id, title, description, status, created_at")

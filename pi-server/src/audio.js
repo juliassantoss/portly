@@ -1,13 +1,18 @@
 const { spawn } = require('child_process');
 
-const DEVICE = process.env.AUDIO_DEVICE ?? 'plughw:0,0';
+// Separate input/output devices. Defaults assume:
+//   - Mic on a USB webcam (e.g. Logitech C210 at plughw:2,0)
+//   - Output via PipeWire `default` sink (e.g. paired BT speaker)
+// Override via .env: AUDIO_INPUT / AUDIO_OUTPUT.
+const INPUT_DEVICE = process.env.AUDIO_INPUT ?? process.env.AUDIO_DEVICE ?? 'plughw:2,0';
+const OUTPUT_DEVICE = process.env.AUDIO_OUTPUT ?? 'default';
 const RATE = process.env.AUDIO_SAMPLE_RATE ?? '16000';
 
 let recordProc = null;
 let playProc = null;
 
-const ARECORD_ARGS = ['-D', DEVICE, '-f', 'S16_LE', '-r', RATE, '-c', '1', '-t', 'raw'];
-const APLAY_ARGS = ['-D', DEVICE, '-f', 'S16_LE', '-r', RATE, '-c', '1', '-t', 'raw'];
+const ARECORD_ARGS = ['-D', INPUT_DEVICE, '-f', 'S16_LE', '-r', RATE, '-c', '1', '-t', 'raw'];
+const APLAY_ARGS = ['-D', OUTPUT_DEVICE, '-f', 'S16_LE', '-r', RATE, '-c', '1', '-t', 'raw'];
 
 // Write a WAV header so HTTP clients (expo-av) can stream the audio
 function wavHeader(sampleRate = 16000, channels = 1, bitDepth = 16) {

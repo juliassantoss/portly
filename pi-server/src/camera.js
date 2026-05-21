@@ -7,8 +7,15 @@ const INTERVAL_MS = Math.round(1000 / FPS);
 
 let captureTimer = null;
 
-// Ordered list of capture commands to try (first one that works wins)
+// Ordered list of capture commands to try (first one that works wins).
+// fswebcam is first because USB webcams are most common; libcamera-still/raspistill
+// only exist when a Pi CSI camera + appropriate stack are present (not on Trixie).
+const CAPTURE_DEVICE = process.env.CAMERA_DEVICE ?? '/dev/video0';
 const CAPTURE_CMDS = [
+  {
+    cmd: 'fswebcam',
+    args: ['-d', CAPTURE_DEVICE, '-r', `${WIDTH}x${HEIGHT}`, '--jpeg', '75', '--no-banner', '-q', '-'],
+  },
   {
     cmd: 'libcamera-still',
     args: ['-o', '-', '--immediate', '-n', '--width', WIDTH, '--height', HEIGHT, '--quality', '75'],
@@ -16,10 +23,6 @@ const CAPTURE_CMDS = [
   {
     cmd: 'raspistill',
     args: ['-o', '-', '-n', '-t', '1', '-w', WIDTH, '-h', HEIGHT, '-q', '75'],
-  },
-  {
-    cmd: 'fswebcam',
-    args: ['-r', `${WIDTH}x${HEIGHT}`, '--jpeg', '75', '--no-banner', '-'],
   },
 ];
 

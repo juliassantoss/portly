@@ -22,6 +22,14 @@ export function LoginScreen({ navigation }: Props) {
       return;
     }
 
+    if (!supabase) {
+      Alert.alert(
+        "Login indisponível",
+        "Supabase não está configurado. Usa 'Continuar em modo demo' ou define EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY no .env.",
+      );
+      return;
+    }
+
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
