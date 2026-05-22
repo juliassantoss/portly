@@ -1,6 +1,8 @@
 import { NavigationContainer, DefaultTheme, createNavigationContainerRef } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
 import * as Notifications from "expo-notifications";
+import Constants from "expo-constants";
+import { Platform } from "react-native";
 import { useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -11,6 +13,8 @@ import { colors } from "./src/theme/colors";
 import type { RootStackParamList } from "./src/navigation/types";
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
+
+const isExpoGo = Constants.appOwnership === 'expo';
 
 const navigationTheme = {
   ...DefaultTheme,
@@ -30,6 +34,9 @@ export default function App() {
     registerForPushNotifications().then((token) => {
       if (token) intercomService.setToken(token);
     });
+
+    // Notification listener not supported in Expo Go on Android (SDK 53+)
+    if (isExpoGo && Platform.OS === 'android') return;
 
     // Navigate to LiveIntercom when user taps a doorbell notification
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {

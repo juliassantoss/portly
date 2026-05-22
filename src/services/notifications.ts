@@ -3,19 +3,21 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-// Show alerts in foreground (handled by the app's UI as well)
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
-
 // In Expo Go (SDK 53+) remote push is stripped out. Dev Build / production use full API.
 const isExpoGo = Constants.appOwnership === 'expo';
+
+// Show alerts in foreground — skip in Expo Go on Android (API removed in SDK 53)
+if (!isExpoGo || Platform.OS === 'ios') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 export async function registerForPushNotifications(): Promise<string | null> {
   if (isExpoGo) {

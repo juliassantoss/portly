@@ -9,7 +9,7 @@
  * Wiring (physical header pins):
  *   Doorbell button : pin 3 (GPIO2) ─ pin 6 (GND)
  *   Servo SG90      : signal → pin 11 (GPIO17), 5V/GND from external PSU (common GND with Pi)
- *   LCD 1602 (4-bit): RS=27, E=29, D4=31, D5=33, D6=35, D7=37 (GPIO 0/5/6/13/19/26)
+ *   LCD 1602 (4-bit): RS=37, E=35, D4=33, D5=31, D6=36, D7=29 (GPIO 26/19/13/6/16/5)
  *   Microphone      : USB webcam or USB mic — first ALSA device
  *   Speaker         : USB / Bluetooth — default ALSA output
  *   Camera          : USB webcam (or Pi Camera via libcamera)

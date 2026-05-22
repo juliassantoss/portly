@@ -159,10 +159,12 @@ bell_button = Button(BELL_PIN, pull_up=True, bounce_time=0.1)
 bell_led = LED(LED_PIN)
 
 # Separate lgpio handle for the LCD pins (gpiozero already manages the others)
+# Pi 5 uses gpiochip4 for the GPIO header; older Pi uses gpiochip0
+_LCD_CHIP_NUM = 4 if os.path.exists('/dev/gpiochip4') else 0
 try:
     if lgpio is None:
         raise RuntimeError("lgpio module not available")
-    lcd_chip = lgpio.gpiochip_open(0)
+    lcd_chip = lgpio.gpiochip_open(_LCD_CHIP_NUM)
     lcd = HD44780(lcd_chip, LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7)
     lcd.show("Portly", "Pronto")
     lcd_ok = True
