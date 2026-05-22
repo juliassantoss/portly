@@ -1,4 +1,4 @@
-const PI_HTTP_URL = process.env.EXPO_PUBLIC_PI_HTTP_URL ?? 'http://192.168.1.98:3000';
+import { PI_HTTP_URL } from "../../config/raspberryPi";
 
 export type RaspberryPiCommand = 'open-door' | 'request-snapshot' | 'check-device-status';
 

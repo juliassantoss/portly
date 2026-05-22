@@ -3,15 +3,15 @@
 Portly GPIO daemon.
 
 Spawned by Node (server.js). Communicates via JSON lines:
-  stdin  → commands from Node   ({"action": "open" | "close" | "lcd" | "led", ...})
-  stdout → events to Node       ({"event": "ready" | "bell" | "door_open" | "door_closed"})
+  stdin  -> commands from Node   ({"action": "open" | "close" | "lcd" | "led", ...})
+  stdout -> events to Node       ({"event": "ready" | "bell" | "door_open" | "door_closed"})
 
 Required packages (on Raspberry Pi OS Bookworm / Trixie):
   sudo apt install python3-gpiozero python3-lgpio
 
 Wiring (BCM numbering):
   Doorbell button : GPIO 2  (physical pin 3)  + GND (pin 6)
-  Bell LED        : GPIO 21 (physical pin 40) → 330Ω → GND
+  Bell LED        : GPIO 21 (physical pin 40) -> 330Ω -> GND
   Servo SG90      : GPIO 17 (physical pin 11) signal only — 5V/GND from external PSU
                     (external PSU GND MUST be tied to a Pi GND pin — common ground required)
   LCD HD44780 1602 (4-bit mode, VDD=3.3V to match Pi logic levels):
@@ -51,7 +51,7 @@ SERVO_PIN = int(os.environ.get("GPIO_SERVO", 17))
 LED_PIN = int(os.environ.get("GPIO_LED", 21))
 
 LCD_RS = int(os.environ.get("GPIO_LCD_RS", 26))
-LCD_E  = int(os.environ.get("GPIO_LCD_E", 19))
+LCD_E = int(os.environ.get("GPIO_LCD_E", 19))
 LCD_D4 = int(os.environ.get("GPIO_LCD_D4", 13))
 LCD_D5 = int(os.environ.get("GPIO_LCD_D5", 6))
 LCD_D6 = int(os.environ.get("GPIO_LCD_D6", 16))
@@ -78,9 +78,12 @@ class HD44780:
         lgpio.gpio_write(self.h, pin, val)
 
     def _pulse_e(self):
-        self._w(self.e, 0); time.sleep(0.001)
-        self._w(self.e, 1); time.sleep(0.001)
-        self._w(self.e, 0); time.sleep(0.001)
+        self._w(self.e, 0)
+        time.sleep(0.001)
+        self._w(self.e, 1)
+        time.sleep(0.001)
+        self._w(self.e, 0)
+        time.sleep(0.001)
 
     def _write_nibble(self, nibble):
         for i, pin in enumerate(self.data_pins):
@@ -101,21 +104,24 @@ class HD44780:
 
     def _init_sequence(self):
         time.sleep(0.2)
-        self._w(self.rs, 0); self._w(self.e, 0)
+        self._w(self.rs, 0)
+        self._w(self.e, 0)
         # Three 8-bit function set nibbles (recovers any prior state)
         for _ in range(3):
-            self._write_nibble(0x03); time.sleep(0.015)
+            self._write_nibble(0x03)
+            time.sleep(0.015)
         # Switch to 4-bit
-        self._write_nibble(0x02); time.sleep(0.015)
+        self._write_nibble(0x02)
+        time.sleep(0.015)
         # Function set sent 3x for reliability on marginal contacts
         self._command(0x28, delay=0.01)
         self._command(0x28, delay=0.01)
         self._command(0x28, delay=0.01)
-        self._command(0x08, delay=0.01)              # Display off
-        self._command(0x01, delay=0.005)             # Clear
-        self._command(0x06, delay=0.01)              # Entry mode: increment, no shift
-        self._command(0x0C, delay=0.01)              # Display on, cursor off, blink off
-        self._command(0x0C, delay=0.01)              # again for reliability
+        self._command(0x08, delay=0.01)  # Display off
+        self._command(0x01, delay=0.005)  # Clear
+        self._command(0x06, delay=0.01)  # Entry mode: increment, no shift
+        self._command(0x0C, delay=0.01)  # Display on, cursor off, blink off
+        self._command(0x0C, delay=0.01)  # again for reliability
 
     def clear(self):
         self._command(0x01, delay=0.005)
@@ -145,7 +151,7 @@ class HD44780:
                 pass
 
 
-# SG90: 1ms → 0°, 1.5ms → 90°, 2ms → 180°. Servo value maps -1..+1 to min..max.
+# SG90: 1ms -> 0°, 1.5ms -> 90°, 2ms -> 180°. Servo value maps -1..+1 to min..max.
 servo = Servo(
     SERVO_PIN,
     min_pulse_width=500 / 1_000_000,   # 500 µs
