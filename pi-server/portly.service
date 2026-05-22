@@ -1,0 +1,15 @@
+[Unit]
+Description=Portly Pi Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/portly/pi-server
+ExecStart=/home/pi/portly/pi-server/venv/bin/python main.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

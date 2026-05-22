@@ -1,0 +1,5 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+websockets>=13.0
+picamera2>=0.3.19
+gpiozero>=2.0
