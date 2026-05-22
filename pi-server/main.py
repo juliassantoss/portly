@@ -1,35 +1,29 @@
 """
-Portly Pi Server
-─────────────────
+Portly Pi Server  —  webcam USB + microfone da webcam, sem GPIO
+─────────────────────────────────────────────────────────────────
 HTTP  :3000  — GET  /status
-              POST /open-door
-              GET  /audio-stream  (microfone Pi → telemóvel, MP3 via ffmpeg)
+              POST /open-door   (stub — sem relé)
+              GET  /audio-stream  (mic da webcam → telemóvel, MP3)
 
 WS    :3001  — wire protocol com o app:
   App → Pi  {"type":"command","action":"answer-call"|"end-call"|"open-lock"}
             {"type":"audio-chunk","data":"<base64 m4a>"}   (PTT)
             {"type":"register-expo-token","token":"..."}
   Pi → App  {"type":"video-frame","data":"<base64 jpeg>"}
-            {"type":"event","name":"doorbell-pressed"|"lock-opened"|"lock-closed"|
-                             "device-online"|"call-started"|"call-ended",
-             "timestamp":<unix>}
-
-GPIO (BCM numbering):
-  DOOR_RELAY_PIN = 17  — relé da fechadura  (active-low, ajusta se necessário)
-  BELL_PIN       = 27  — botão da campainha (pull-up interno)
+            {"type":"event","name":"doorbell-pressed"|"lock-opened"|...}
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
-import io
 import json
 import subprocess
 import tempfile
 import threading
 import time
 
+import cv2
 import uvicorn
 import websockets
 import websockets.exceptions
@@ -38,42 +32,37 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-HTTP_PORT      = 3000
-WS_PORT        = 3001
-DOOR_RELAY_PIN = 17   # GPIO BCM do relé (ajusta ao teu circuito)
-BELL_PIN       = 27   # GPIO BCM do botão da campainha
-DOOR_OPEN_SECS = 3    # segundos que o relé fica activo
-VIDEO_FPS      = 15
+HTTP_PORT   = 3000
+WS_PORT     = 3001
+VIDEO_FPS   = 15
+VIDEO_INDEX = 0   # /dev/video0 — muda para 1, 2... se a webcam não for a primeira
 
-# ── Câmara ─────────────────────────────────────────────────────────────────────
-try:
-    from picamera2 import Picamera2
-    _cam = Picamera2()
-    _cam.configure(
-        _cam.create_video_configuration(main={"size": (640, 480), "format": "RGB888"})
-    )
-    _cam.start()
+# ── Câmara (webcam USB via OpenCV) ─────────────────────────────────────────────
+_cap = cv2.VideoCapture(VIDEO_INDEX)
+if _cap.isOpened():
+    _cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    _cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    _cap.set(cv2.CAP_PROP_FPS, VIDEO_FPS)
     CAMERA_OK = True
-    print(f"✓ Câmara iniciada (640×480 @ {VIDEO_FPS} fps)")
-except Exception as _e:
-    _cam = None
+    print(f"✓ Webcam aberta (/dev/video{VIDEO_INDEX})")
+else:
     CAMERA_OK = False
-    print(f"✗ Câmara não disponível: {_e}")
+    print(f"✗ Webcam não encontrada em /dev/video{VIDEO_INDEX}")
 
-# ── GPIO ────────────────────────────────────────────────────────────────────────
-try:
-    from gpiozero import Button, OutputDevice
-    _relay = OutputDevice(DOOR_RELAY_PIN, active_high=False, initial_value=False)
-    _bell  = Button(BELL_PIN, pull_up=True, bounce_time=0.1)
-    GPIO_OK = True
-    print(f"✓ GPIO: relay=BCM{DOOR_RELAY_PIN}  campainha=BCM{BELL_PIN}")
-except Exception as _e:
-    _relay = _bell = None
-    GPIO_OK = False
-    print(f"✗ GPIO não disponível: {_e}")
+_cap_lock = threading.Lock()
+
+
+def _capture_jpeg() -> bytes | None:
+    with _cap_lock:
+        ret, frame = _cap.read()
+    if not ret:
+        return None
+    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+    return buf.tobytes() if ok else None
+
 
 # ── WebSocket clients ───────────────────────────────────────────────────────────
-_clients: set = set()   # websockets.ServerConnection
+_clients: set = set()
 
 
 async def _broadcast(msg: dict) -> None:
@@ -89,42 +78,22 @@ _stream_task: asyncio.Task | None = None
 
 
 async def _video_loop() -> None:
-    while _streaming and CAMERA_OK and _cam:
-        try:
-            buf = io.BytesIO()
-            _cam.capture_file(buf, format="jpeg")
-            b64 = base64.b64encode(buf.getvalue()).decode()
+    while _streaming and CAMERA_OK:
+        frame = await asyncio.get_event_loop().run_in_executor(None, _capture_jpeg)
+        if frame:
+            b64 = base64.b64encode(frame).decode()
             await _broadcast({"type": "video-frame", "data": b64})
-        except Exception:
-            pass
         await asyncio.sleep(1 / VIDEO_FPS)
 
 
-# ── Porta / relé ────────────────────────────────────────────────────────────────
-def _pulse_relay() -> None:
-    if GPIO_OK and _relay:
-        _relay.on()
-        time.sleep(DOOR_OPEN_SECS)
-        _relay.off()
-
-
-# ── Campainha (GPIO → WebSocket) ────────────────────────────────────────────────
-def _setup_bell(loop: asyncio.AbstractEventLoop) -> None:
-    if not GPIO_OK or _bell is None:
-        return
-
-    def _on_press():
-        asyncio.run_coroutine_threadsafe(
-            _broadcast({"type": "event", "name": "doorbell-pressed", "timestamp": time.time()}),
-            loop,
-        )
-
-    _bell.when_pressed = _on_press
-
-
-# ── Áudio Pi → telemóvel (ffmpeg, streaming MP3) ───────────────────────────────
+# ── Áudio Pi → telemóvel (mic da webcam via ffmpeg) ────────────────────────────
 def _mic_generator():
-    """Capta do microfone ALSA e converte para MP3 em tempo real."""
+    """
+    Capta áudio da webcam (ALSA) e envia como MP3 em streaming.
+    Se o mic da webcam não for 'default', descobre o dispositivo com:
+        arecord -l
+    e muda "-i default" para "-i plughw:CARD,DEV"
+    """
     cmd = [
         "ffmpeg", "-loglevel", "quiet",
         "-f", "alsa", "-i", "default",
@@ -142,9 +111,8 @@ def _mic_generator():
         proc.kill()
 
 
-# ── Áudio telemóvel → Pi (PTT, M4A chunks) ─────────────────────────────────────
+# ── PTT: telemóvel → altifalante do Pi ─────────────────────────────────────────
 def _play_ptt(b64: str) -> None:
-    """Recebe um clip M4A em base64 e toca no altifalante do Pi."""
     try:
         data = base64.b64decode(b64)
         with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as f:
@@ -171,7 +139,7 @@ def route_status():
     return {
         "online": True,
         "camera": CAMERA_OK,
-        "gpio": GPIO_OK,
+        "gpio": False,
         "streaming": _streaming,
         "clients": len(_clients),
         "timestamp": time.time(),
@@ -180,10 +148,9 @@ def route_status():
 
 @http_app.post("/open-door")
 def route_open_door():
-    if not GPIO_OK or _relay is None:
-        return JSONResponse({"success": False, "message": "GPIO não disponível"}, status_code=503)
-    threading.Thread(target=_pulse_relay, daemon=True).start()
-    return {"success": True, "message": f"Porta aberta ({DOOR_OPEN_SECS}s)"}
+    # Sem relé — devolve sucesso para o app não mostrar erro.
+    # Liga aqui o teu actuador quando tiveres hardware.
+    return {"success": True, "message": "Comando recebido (sem relé ligado)"}
 
 
 @http_app.get("/audio-stream")
@@ -206,11 +173,10 @@ async def _ws_handler(ws) -> None:
             except Exception:
                 continue
 
-            t = msg.get("type")
+            t      = msg.get("type")
+            action = msg.get("action")
 
             if t == "command":
-                action = msg.get("action")
-
                 if action == "answer-call":
                     _streaming = True
                     if _stream_task is None or _stream_task.done():
@@ -222,11 +188,11 @@ async def _ws_handler(ws) -> None:
                     await _broadcast({"type": "event", "name": "call-ended", "timestamp": time.time()})
 
                 elif action == "open-lock":
-                    threading.Thread(target=_pulse_relay, daemon=True).start()
+                    # Sem relé — emite os eventos para o app actualizar a UI
                     await _broadcast({"type": "event", "name": "lock-opened", "timestamp": time.time()})
 
                     async def _emit_closed():
-                        await asyncio.sleep(DOOR_OPEN_SECS)
+                        await asyncio.sleep(3)
                         await _broadcast({"type": "event", "name": "lock-closed", "timestamp": time.time()})
 
                     asyncio.create_task(_emit_closed())
@@ -235,7 +201,7 @@ async def _ws_handler(ws) -> None:
                 threading.Thread(target=_play_ptt, args=(msg.get("data", ""),), daemon=True).start()
 
             elif t == "register-expo-token":
-                print(f"[ws] token: {str(msg.get('token',''))[:24]}…")
+                print(f"[ws] Expo token: {str(msg.get('token', ''))[:24]}…")
 
     except websockets.exceptions.ConnectionClosed:
         pass
@@ -248,9 +214,6 @@ async def _ws_handler(ws) -> None:
 
 # ── Arranque ────────────────────────────────────────────────────────────────────
 async def main() -> None:
-    loop = asyncio.get_running_loop()
-    _setup_bell(loop)
-
     ws_server = await websockets.serve(_ws_handler, "0.0.0.0", WS_PORT)
     print(f"✓ WebSocket  ws://0.0.0.0:{WS_PORT}")
 
