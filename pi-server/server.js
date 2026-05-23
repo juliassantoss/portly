@@ -126,19 +126,12 @@ function emitEvent(name, extra = {}) {
 let activeCall = false;
 let doorOpen = false;
 let bellRingingTimer = null;
-let doorbellSessionActive = false;
 
 function refreshDisplay() {
   if (doorOpen) return setDisplay('Porta aberta', '');
   if (activeCall) return setDisplay('Em chamada', '');
   if (bellRingingTimer) return setDisplay('A tocar!', '');
   setDisplay('Portly', 'Pronto');
-}
-
-function endDoorbellSession() {
-  if (!doorbellSessionActive) return;
-  doorbellSessionActive = false;
-  setLed(false);
 }
 
 function emitLockStatus(status) {
@@ -189,7 +182,7 @@ wss.on('connection', (ws) => {
       stopAudioCapture();
       stopPlayback();
       activeCall = false;
-      endDoorbellSession();
+      setLed(false);
       refreshDisplay();
       emitEvent('call-ended');
     }
@@ -208,6 +201,7 @@ async function handleCommand(ws, action) {
         }
       });
       activeCall = true;
+      setLed(true);
       if (bellRingingTimer) { clearTimeout(bellRingingTimer); bellRingingTimer = null; }
       refreshDisplay();
       emitEvent('call-started');
@@ -217,7 +211,7 @@ async function handleCommand(ws, action) {
       stopCameraStream();
       stopAudioCapture();
       activeCall = false;
-      endDoorbellSession();
+      setLed(false);
       refreshDisplay();
       emitEvent('call-ended');
       break;
@@ -237,12 +231,9 @@ const BELL_RINGING_TIMEOUT_MS = 30_000;
 
 function handleBellPress() {
   console.log('[bell] Pressed!');
-  doorbellSessionActive = true;
-  setLed(true);
   if (bellRingingTimer) clearTimeout(bellRingingTimer);
   bellRingingTimer = setTimeout(() => {
     bellRingingTimer = null;
-    if (!activeCall) endDoorbellSession();
     refreshDisplay();
   }, BELL_RINGING_TIMEOUT_MS);
   refreshDisplay();
@@ -258,3 +249,7 @@ function handleBellPress() {
 initGpio(handleBellPress)
   .then(() => refreshDisplay())
   .catch((e) => console.warn('[gpio] Init error:', e.message));
+
+// Keep BT speaker awake: idempotent reconnect on startup + every 30s
+reconnectBtSpeaker();
+setInterval(reconnectBtSpeaker, 30_000);

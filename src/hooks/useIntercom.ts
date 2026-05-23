@@ -28,6 +28,9 @@ export function useIntercom({ subscribeFrames = false }: Options = {}) {
   useEffect(() => {
     intercomService.connect();
 
+    // Seed initial connected state — service may already be OPEN from a prior screen
+    if (intercomService.isConnected()) setConnected(true);
+
     const unsub = intercomService.subscribe((msg) => {
       switch (msg.type) {
         case 'connected':

@@ -123,6 +123,10 @@ class IntercomService {
     }
   }
 
+  isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+
   subscribe(handler: Handler): () => void {
     this.handlers.add(handler);
     return () => this.handlers.delete(handler);

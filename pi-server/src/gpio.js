@@ -29,11 +29,7 @@ function initGpio(onBell) {
     try {
       daemon = spawn('python3', [DAEMON_PATH], {
         stdio: ['pipe', 'pipe', 'inherit'],
-        env: {
-          ...process.env,
-          GPIO_BELL: process.env.GPIO_BELL ?? '2',
-          GPIO_SERVO: process.env.GPIO_SERVO ?? '17',
-        },
+        env: process.env,
       });
     } catch (e) {
       console.warn('[gpio] Failed to spawn Python daemon:', e.message);
