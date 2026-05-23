@@ -4,6 +4,7 @@ import { ActivityScreen } from "../screens/ActivityScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { LiveIntercomScreen } from "../screens/LiveIntercomScreen";
 import { LoginScreen } from "../screens/LoginScreen";
+import { RegisterScreen } from "../screens/RegisterScreen";
 import { SettingsScreen } from "../screens/SettingsScreen";
 import type { RootStackParamList } from "./types";
 
@@ -18,6 +19,7 @@ export function AppNavigator() {
       }}
     >
       <Stack.Screen component={LoginScreen} name="Login" />
+      <Stack.Screen component={RegisterScreen} name="Register" />
       <Stack.Screen
         component={HomeScreen}
         name="Home"
