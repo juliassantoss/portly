@@ -10,8 +10,8 @@ Required packages (on Raspberry Pi OS Bookworm / Trixie):
   sudo apt install python3-gpiozero python3-lgpio
 
 Wiring (BCM numbering):
-  Doorbell button : GPIO 2  (physical pin 3)  + GND (pin 6)
-  Bell LED        : GPIO 21 (physical pin 40) -> 330Ω -> GND
+  Doorbell button : GPIO 21  (physical pin 40)  + GND (pin 39)
+  Bell LED        : GPIO 14 (physical pin 8) -> 330Ω -> GND
   Servo SG90      : GPIO 17 (physical pin 11) signal only — 5V/GND from external PSU
                     (external PSU GND MUST be tied to a Pi GND pin — common ground required)
   LCD HD44780 1602 (4-bit mode, VDD=3.3V to match Pi logic levels):

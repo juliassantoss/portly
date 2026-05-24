@@ -35,7 +35,7 @@ try:
 except Exception:
     lgpio = None
 
-from gpiozero import LED, Button, Device, Servo
+from gpiozero import LED, Button, Device
 
 try:
     from gpiozero.pins.lgpio import LGPIOFactory
@@ -145,32 +145,55 @@ class HD44780:
                 pass
 
 
-# SG90: 1ms → 0°, 1.5ms → 90°, 2ms → 180°. Servo value maps -1..+1 to min..max.
-servo = Servo(
-    SERVO_PIN,
-    min_pulse_width=500 / 1_000_000,   # 500 µs
-    max_pulse_width=1500 / 1_000_000,  # 1500 µs (locked / neutral)
-)
-
-SERVO_LOCKED = 1.0   # 1500 µs
-SERVO_OPEN = -1.0  # 500 µs
+# Servo pulse widths in microseconds, controlled via lgpio.tx_servo (hardware-timed,
+# stable 50 Hz pulse train — gpiozero.Servo on Pi 5 falls back to software PWM which
+# is too jittery to hold position). Directions: HOME is the resting closed angle,
+# OPEN is +300 µs from TIGHTEN (mirrored around HOME so the over-rotate-then-relax
+# close sequence still seats the latch firmly).
+SERVO_HOME_US = 2000      # rest position (no torque load)
+SERVO_OPEN_US = 1500      # open angle (500 µs swing — validated direction)
+SERVO_TIGHTEN_US = 2300   # over-rotate past HOME to seat the latch firmly
+SERVO_TIGHTEN_S = 0.4     # how long to hold tighten before relaxing to HOME
 
 bell_button = Button(BELL_PIN, pull_up=True, bounce_time=0.1)
 bell_led = LED(LED_PIN)
 
-# Separate lgpio handle for the LCD pins (gpiozero already manages the others)
-# Pi 5 uses gpiochip4 for the GPIO header; older Pi uses gpiochip0
-_LCD_CHIP_NUM = 4 if os.path.exists('/dev/gpiochip4') else 0
+# Shared lgpio chip handle for direct hardware-timed control (servo + LCD).
+# Trixie / RP1 puts the GPIO header on gpiochip0.
+gpio_chip = None
+if lgpio is not None:
+    try:
+        gpio_chip = lgpio.gpiochip_open(0)
+        lgpio.gpio_claim_output(gpio_chip, SERVO_PIN, 0)
+    except Exception as e:
+        print(json.dumps({"event": "lgpio_error", "message": str(e)}), flush=True)
+        gpio_chip = None
+
+
+def servo_set(us: int) -> None:
+    if gpio_chip is None:
+        return
+    lgpio.tx_servo(gpio_chip, SERVO_PIN, us)
+
+
+def servo_off() -> None:
+    if gpio_chip is None:
+        return
+    try:
+        lgpio.tx_servo(gpio_chip, SERVO_PIN, 0)
+    except Exception:
+        pass
+
+
+# LCD reuses the same lgpio chip handle
 try:
-    if lgpio is None:
-        raise RuntimeError("lgpio module not available")
-    lcd_chip = lgpio.gpiochip_open(_LCD_CHIP_NUM)
-    lcd = HD44780(lcd_chip, LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7)
+    if gpio_chip is None:
+        raise RuntimeError("lgpio chip not available")
+    lcd = HD44780(gpio_chip, LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7)
     lcd.show("Portly", "Pronto")
     lcd_ok = True
 except Exception as e:
     lcd = None
-    lcd_chip = None
     lcd_ok = False
     print(json.dumps({"event": "lcd_error", "message": str(e)}), flush=True)
 
@@ -185,8 +208,8 @@ def on_bell():
 
 bell_button.when_pressed = on_bell
 
-# Start locked
-servo.value = SERVO_LOCKED
+# Start at home (closed)
+servo_set(SERVO_HOME_US)
 emit({
     "event": "ready",
     "bell": BELL_PIN,
@@ -197,13 +220,13 @@ emit({
 
 
 def shutdown(*_):
-    servo.detach()
+    servo_off()
     bell_led.off()
     if lcd:
         lcd.close()
-    if lcd_chip is not None:
+    if gpio_chip is not None:
         try:
-            lgpio.gpiochip_close(lcd_chip)
+            lgpio.gpiochip_close(gpio_chip)
         except Exception:
             pass
     sys.exit(0)
@@ -224,10 +247,13 @@ for line in sys.stdin:
 
     action = cmd.get("action")
     if action == "open":
-        servo.value = SERVO_OPEN
+        servo_set(SERVO_OPEN_US)
         emit({"event": "door_open"})
     elif action == "close":
-        servo.value = SERVO_LOCKED
+        # Briefly over-rotate to seat the lock, then relax to the home position
+        servo_set(SERVO_TIGHTEN_US)
+        time.sleep(SERVO_TIGHTEN_S)
+        servo_set(SERVO_HOME_US)
         emit({"event": "door_closed"})
     elif action == "lcd" and lcd:
         lcd.show(cmd.get("line1", ""), cmd.get("line2", ""))

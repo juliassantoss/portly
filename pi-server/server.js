@@ -45,7 +45,7 @@ function reconnectBtSpeaker() {
   bt.on('error', (e) => console.warn('[bt] bluetoothctl error:', e.message));
 }
 const { startCameraStream, stopCameraStream } = require('./src/camera');
-const { pipeAudioToResponse, stopAudioCapture, playAudioChunk, stopPlayback } = require('./src/audio');
+const { pipeAudioToResponse, stopAudioCapture, playAudioChunk, stopPlayback, playBellLoop, stopBellLoop } = require('./src/audio');
 const { sendDoorbell } = require('./src/notifications');
 
 const PORT_HTTP = Number(process.env.PORT_HTTP ?? 3000);
@@ -194,6 +194,7 @@ wss.on('connection', (ws) => {
 async function handleCommand(ws, action) {
   switch (action) {
     case 'answer-call':
+      stopBellLoop(); // silence ringtone before the call audio takes over the speaker
       reconnectBtSpeaker(); // wake BT speaker for outgoing audio
       startCameraStream((frame) => {
         if (ws.readyState === 1) {
@@ -231,9 +232,11 @@ const BELL_RINGING_TIMEOUT_MS = 30_000;
 
 function handleBellPress() {
   console.log('[bell] Pressed!');
+  playBellLoop();
   if (bellRingingTimer) clearTimeout(bellRingingTimer);
   bellRingingTimer = setTimeout(() => {
     bellRingingTimer = null;
+    stopBellLoop();
     refreshDisplay();
   }, BELL_RINGING_TIMEOUT_MS);
   refreshDisplay();

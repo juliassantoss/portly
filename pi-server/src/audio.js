@@ -1,4 +1,7 @@
 const { spawn } = require('child_process');
+const path = require('path');
+
+const DOORBELL_MP3 = path.join(__dirname, '..', 'sounds', 'doorbell.mp3');
 
 // Separate input/output devices. Defaults assume:
 //   - Mic on a USB webcam (e.g. Logitech C210 at plughw:2,0)
@@ -106,4 +109,45 @@ function stopPlayback() {
   }
 }
 
-module.exports = { pipeAudioToResponse, startAudioCapture, stopAudioCapture, playAudioChunk, stopPlayback };
+// Doorbell loop: plays doorbell.mp3 on repeat until stopped (or call answered).
+let bellLoop = null;
+function playBellLoop() {
+  if (bellLoop) return;
+  try {
+    const ff = spawn('ffmpeg', [
+      '-loglevel', 'error',
+      '-stream_loop', '-1',
+      '-i', DOORBELL_MP3,
+      '-f', 's16le', '-ar', '22050', '-ac', '1',
+      'pipe:1',
+    ]);
+    const pl = spawn('aplay', ['-D', OUTPUT_DEVICE, '-f', 'S16_LE', '-r', '22050', '-c', '1', '-t', 'raw']);
+    ff.stdout.pipe(pl.stdin);
+    // Swallow EPIPE/ECONNRESET when we kill the pipeline mid-flight
+    ff.stdout.on('error', () => {});
+    pl.stdin.on('error', () => {});
+    ff.on('error', () => {});
+    pl.on('error', () => {});
+    ff.stderr.on('data', (d) => console.warn('[bell-loop][ff]', d.toString().trim()));
+    pl.stderr.on('data', (d) => console.warn('[bell-loop][aplay]', d.toString().trim()));
+    pl.on('close', () => { if (bellLoop && bellLoop.pl === pl) bellLoop = null; });
+    bellLoop = { ff, pl };
+    console.log('[bell] loop playback started →', OUTPUT_DEVICE);
+  } catch (e) {
+    console.warn('[bell] loop start failed:', e.message);
+  }
+}
+
+function stopBellLoop() {
+  if (!bellLoop) return;
+  const { ff, pl } = bellLoop;
+  bellLoop = null;
+  // Detach the pipe first so ffmpeg's writes don't error after aplay dies
+  try { ff.stdout.unpipe(pl.stdin); } catch {}
+  try { pl.stdin.end(); } catch {}
+  try { ff.kill('SIGKILL'); } catch {}
+  try { pl.kill('SIGKILL'); } catch {}
+  console.log('[bell] loop playback stopped');
+}
+
+module.exports = { pipeAudioToResponse, startAudioCapture, stopAudioCapture, playAudioChunk, stopPlayback, playBellLoop, stopBellLoop };
