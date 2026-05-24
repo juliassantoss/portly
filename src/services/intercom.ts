@@ -1,5 +1,4 @@
-const PI_WS_URL   = process.env.EXPO_PUBLIC_PI_WS_URL   ?? 'ws://192.168.1.98:3001';
-const PI_HTTP_URL = process.env.EXPO_PUBLIC_PI_HTTP_URL ?? 'http://192.168.1.98:3000';
+import { PI_HTTP_URL, PI_WS_URL } from "../config/raspberryPi";
 
 export { PI_HTTP_URL };
 
@@ -122,6 +121,10 @@ class IntercomService {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(toPiMessage(msg)));
     }
+  }
+
+  isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
   }
 
   subscribe(handler: Handler): () => void {

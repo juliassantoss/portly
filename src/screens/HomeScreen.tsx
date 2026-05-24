@@ -1,10 +1,12 @@
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppButton } from "../components/AppButton";
 import { PortlyLogo } from "../components/PortlyLogo";
 import { useIntercom } from "../hooks/useIntercom";
+import { supabase } from "../integrations/supabase/client";
 import type { RootStackParamList } from "../navigation/types";
 import { colors } from "../theme/colors";
 
@@ -12,6 +14,30 @@ type Props = NativeStackScreenProps<RootStackParamList, "Home">;
 
 export function HomeScreen({ navigation }: Props) {
   const { connected, hasBell, bellTimestamp, dismissBell } = useIntercom();
+  const [userName, setUserName] = useState("");
+
+  useEffect(() => {
+    async function loadName() {
+      if (!supabase) return;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Tenta ler da tabela profiles primeiro
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("name")
+        .eq("id", user.id)
+        .single();
+
+      const name: string =
+        profile?.name ||
+        (user.user_metadata?.full_name as string | undefined) ||
+        "";
+
+      if (name) setUserName(name.split(" ")[0]); // só o primeiro nome
+    }
+    loadName();
+  }, []);
 
   function handleAnswer() {
     dismissBell();
@@ -28,7 +54,7 @@ export function HomeScreen({ navigation }: Props) {
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Olá, Júlia</Text>
+            <Text style={styles.greeting}>Olá{userName ? `, ${userName}` : ""}</Text>
             <Text style={styles.subtitle}>
               {connected ? "Porta principal monitorada" : "A ligar ao videoporteiro…"}
             </Text>

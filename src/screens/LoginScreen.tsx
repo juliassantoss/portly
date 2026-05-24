@@ -1,6 +1,6 @@
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppButton } from "../components/AppButton";
@@ -25,7 +25,7 @@ export function LoginScreen({ navigation }: Props) {
     if (!supabase) {
       Alert.alert(
         "Login indisponível",
-        "Supabase não está configurado. Usa 'Continuar em modo demo' ou define EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY no .env.",
+        "Supabase não está configurado. Define EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY no .env.",
       );
       return;
     }
@@ -81,11 +81,12 @@ export function LoginScreen({ navigation }: Props) {
             label={loading ? "A entrar…" : "Entrar"}
             onPress={handleLogin}
           />
-          <AppButton
-            label="Continuar em modo demo"
-            onPress={() => navigation.replace("Home")}
-            variant="ghost"
-          />
+          <Pressable onPress={() => navigation.navigate("Register")} style={styles.registerLink}>
+            <Text style={styles.registerText}>
+              Não tens conta?{" "}
+              <Text style={styles.registerTextBold}>Criar conta</Text>
+            </Text>
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -156,5 +157,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     minHeight: 54,
     paddingHorizontal: 16,
+  },
+  registerLink: {
+    alignItems: "center",
+    paddingVertical: 4,
+  },
+  registerText: {
+    color: colors.textMuted,
+    fontSize: 14,
+  },
+  registerTextBold: {
+    color: colors.primary,
+    fontWeight: "700",
   },
 });

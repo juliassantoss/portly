@@ -9,7 +9,7 @@
  * Wiring (physical header pins):
  *   Doorbell button : pin 3 (GPIO2) ─ pin 6 (GND)
  *   Servo SG90      : signal → pin 11 (GPIO17), 5V/GND from external PSU (common GND with Pi)
- *   LCD 1602 (4-bit): RS=27, E=29, D4=31, D5=33, D6=35, D7=37 (GPIO 0/5/6/13/19/26)
+ *   LCD 1602 (4-bit): RS=37, E=35, D4=33, D5=31, D6=36, D7=29 (GPIO 26/19/13/6/16/5)
  *   Microphone      : USB webcam or USB mic — first ALSA device
  *   Speaker         : USB / Bluetooth — default ALSA output
  *   Camera          : USB webcam (or Pi Camera via libcamera)
@@ -31,8 +31,21 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 
 const { initGpio, openDoorWithAutoClose, getDoorStatus, setDisplay, setLed } = require('./src/gpio');
+const { spawn } = require('child_process');
+
+const BT_SPEAKER_MAC = process.env.BT_SPEAKER_MAC ?? '41:42:50:87:45:07';
+
+function reconnectBtSpeaker() {
+  // Fire-and-forget bluetoothctl connect. Idempotent — does nothing if already connected.
+  const bt = spawn('bluetoothctl', ['connect', BT_SPEAKER_MAC]);
+  bt.on('close', (code) => {
+    if (code === 0) console.log('[bt] reconnected to', BT_SPEAKER_MAC);
+    else console.log('[bt] connect attempt exited', code);
+  });
+  bt.on('error', (e) => console.warn('[bt] bluetoothctl error:', e.message));
+}
 const { startCameraStream, stopCameraStream } = require('./src/camera');
-const { pipeAudioToResponse, stopAudioCapture, playAudioChunk, stopPlayback } = require('./src/audio');
+const { pipeAudioToResponse, stopAudioCapture, playAudioChunk, stopPlayback, playBellLoop, stopBellLoop } = require('./src/audio');
 const { sendDoorbell } = require('./src/notifications');
 
 const PORT_HTTP = Number(process.env.PORT_HTTP ?? 3000);
@@ -56,12 +69,14 @@ app.get('/status', (req, res) => {
 
 // Live microphone stream (expo-av consumes this as a WAV HTTP stream)
 app.get('/audio-stream', (req, res) => {
+  console.log('[http] /audio-stream requested by', req.ip);
   const ok = pipeAudioToResponse(res);
   if (!ok) res.status(503).json({ error: 'Microphone not available' });
 });
 
 // Back-compat alias — older builds still call /audio
 app.get('/audio', (req, res) => {
+  console.log('[http] /audio requested by', req.ip);
   const ok = pipeAudioToResponse(res);
   if (!ok) res.status(503).json({ error: 'Microphone not available' });
 });
@@ -111,19 +126,12 @@ function emitEvent(name, extra = {}) {
 let activeCall = false;
 let doorOpen = false;
 let bellRingingTimer = null;
-let doorbellSessionActive = false;
 
 function refreshDisplay() {
   if (doorOpen) return setDisplay('Porta aberta', '');
   if (activeCall) return setDisplay('Em chamada', '');
   if (bellRingingTimer) return setDisplay('A tocar!', '');
   setDisplay('Portly', 'Pronto');
-}
-
-function endDoorbellSession() {
-  if (!doorbellSessionActive) return;
-  doorbellSessionActive = false;
-  setLed(false);
 }
 
 function emitLockStatus(status) {
@@ -139,6 +147,12 @@ wss.on('connection', (ws) => {
   ws.on('message', async (raw) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
+
+    // Log every incoming message (truncate audio data for readability)
+    const logged = msg.type === 'audio-chunk'
+      ? { type: msg.type, dataLen: (msg.data ?? '').length }
+      : msg;
+    console.log('[ws] ←', JSON.stringify(logged));
 
     switch (msg.type) {
       case 'register-expo-token':
@@ -168,7 +182,7 @@ wss.on('connection', (ws) => {
       stopAudioCapture();
       stopPlayback();
       activeCall = false;
-      endDoorbellSession();
+      setLed(false);
       refreshDisplay();
       emitEvent('call-ended');
     }
@@ -180,12 +194,15 @@ wss.on('connection', (ws) => {
 async function handleCommand(ws, action) {
   switch (action) {
     case 'answer-call':
+      stopBellLoop(); // silence ringtone before the call audio takes over the speaker
+      reconnectBtSpeaker(); // wake BT speaker for outgoing audio
       startCameraStream((frame) => {
         if (ws.readyState === 1) {
           ws.send(JSON.stringify({ type: 'video-frame', data: frame }));
         }
       });
       activeCall = true;
+      setLed(true);
       if (bellRingingTimer) { clearTimeout(bellRingingTimer); bellRingingTimer = null; }
       refreshDisplay();
       emitEvent('call-started');
@@ -195,7 +212,7 @@ async function handleCommand(ws, action) {
       stopCameraStream();
       stopAudioCapture();
       activeCall = false;
-      endDoorbellSession();
+      setLed(false);
       refreshDisplay();
       emitEvent('call-ended');
       break;
@@ -215,12 +232,11 @@ const BELL_RINGING_TIMEOUT_MS = 30_000;
 
 function handleBellPress() {
   console.log('[bell] Pressed!');
-  doorbellSessionActive = true;
-  setLed(true);
+  playBellLoop();
   if (bellRingingTimer) clearTimeout(bellRingingTimer);
   bellRingingTimer = setTimeout(() => {
     bellRingingTimer = null;
-    if (!activeCall) endDoorbellSession();
+    stopBellLoop();
     refreshDisplay();
   }, BELL_RINGING_TIMEOUT_MS);
   refreshDisplay();
@@ -236,3 +252,7 @@ function handleBellPress() {
 initGpio(handleBellPress)
   .then(() => refreshDisplay())
   .catch((e) => console.warn('[gpio] Init error:', e.message));
+
+// Keep BT speaker awake: idempotent reconnect on startup + every 30s
+reconnectBtSpeaker();
+setInterval(reconnectBtSpeaker, 30_000);
