@@ -159,12 +159,29 @@ bell_button = Button(BELL_PIN, pull_up=True, bounce_time=0.1)
 bell_led = LED(LED_PIN)
 
 # Shared lgpio chip handle for direct hardware-timed control (servo + LCD).
-# Trixie / RP1 puts the GPIO header on gpiochip0.
+# Pi 5 (RP1) puts the 40-pin header on gpiochip4; older Pi uses gpiochip0.
+def _open_gpio_chip() -> tuple:
+    """Returns (handle, chip_num) for the first chip where SERVO_PIN can be claimed."""
+    for chip_num in (4, 0):
+        try:
+            h = lgpio.gpiochip_open(chip_num)
+            lgpio.gpio_claim_output(h, SERVO_PIN, 0)
+            return h, chip_num
+        except Exception:
+            try:
+                lgpio.gpiochip_close(h)
+            except Exception:
+                pass
+    return None, None
+
 gpio_chip = None
+gpio_chip_num = None
 if lgpio is not None:
     try:
-        gpio_chip = lgpio.gpiochip_open(0)
-        lgpio.gpio_claim_output(gpio_chip, SERVO_PIN, 0)
+        gpio_chip, gpio_chip_num = _open_gpio_chip()
+        if gpio_chip is None:
+            raise RuntimeError("Nenhum gpiochip encontrado com o pino do servo")
+        print(json.dumps({"event": "lgpio_info", "message": f"gpiochip{gpio_chip_num} aberto"}), flush=True)
     except Exception as e:
         print(json.dumps({"event": "lgpio_error", "message": str(e)}), flush=True)
         gpio_chip = None
